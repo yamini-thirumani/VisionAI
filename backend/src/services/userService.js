@@ -83,7 +83,7 @@ export const updateUserProfile = async (userId, updateData) => {
     }
     
     // Fields that can be updated
-    const allowedUpdates = ['name', 'age', 'gender', 'phone', 'medicalHistory'];
+    const allowedUpdates = ['name', 'age', 'gender', 'phone', 'medicalHistory', 'calibration'];
     
     // Update only allowed fields
     Object.keys(updateData).forEach(key => {
@@ -93,6 +93,12 @@ export const updateUserProfile = async (userId, updateData) => {
           user.medicalHistory = {
             ...user.medicalHistory.toObject(),
             ...updateData.medicalHistory
+          };
+        } else if (key === 'calibration' && user.calibration) {
+          user.calibration = {
+            ...user.calibration.toObject?.() || user.calibration,
+            ...updateData.calibration,
+            lastCalibratedAt: new Date()
           };
         } else {
           user[key] = updateData[key];

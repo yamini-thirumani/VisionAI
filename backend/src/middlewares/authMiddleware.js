@@ -2,7 +2,7 @@
 
 import { verifyToken } from '../config/jwt.js';
 import User from '../models/User.js';
-import { AuthenticationError, NotFoundError } from '../utils/errorTypes.js';
+import { AuthenticationError, AuthorizationError, NotFoundError } from '../utils/errorTypes.js';
 
 /**
  * Protect routes - Require authentication

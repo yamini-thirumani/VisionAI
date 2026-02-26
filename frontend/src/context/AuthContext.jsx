@@ -1,0 +1,53 @@
+import { createContext, useState, useEffect } from 'react';
+import { authApi } from '../api/authApi';
+
+export const AuthContext = createContext();
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        const response = await authApi.getCurrentUser();
+        setUser(response.data.data.user);
+      } catch (error) {
+        localStorage.removeItem('token');
+      }
+    }
+    setLoading(false);
+  };
+
+  const login = async (email, password) => {
+    const response = await authApi.login({ email, password });
+    const { user, token } = response.data.data;
+    localStorage.setItem('token', token);
+    setUser(user);
+    return user;
+  };
+
+  const register = async (data) => {
+    const response = await authApi.register(data);
+    const { user, token } = response.data.data;
+    localStorage.setItem('token', token);
+    setUser(user);
+    return user;
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    setUser(null);
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, login, register, logout, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};

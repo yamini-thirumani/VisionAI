@@ -103,6 +103,22 @@ const userSchema = new mongoose.Schema({
   lastLoginAt: {
     type: Date,
     default: null
+  },
+
+  // ========================================
+  // DEVICE CALIBRATION (Optional)
+  // ========================================
+
+  calibration: {
+    K: {
+      type: Number,
+      min: [10, 'Calibration constant K seems too small'],
+      max: [1000, 'Calibration constant K seems too large']
+    },
+    lastCalibratedAt: {
+      type: Date,
+      default: null
+    }
   }
   
 }, 

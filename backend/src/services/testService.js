@@ -1,6 +1,7 @@
 // src/services/testService.js
 
 import TestResult from '../models/TestResult.js';
+import mongoose from 'mongoose';
 import User from '../models/User.js';
 import {
   NotFoundError,
@@ -54,6 +55,12 @@ export const createTestResult = async (userId, testData) => {
     
   } catch (error) {
     logger.error(`Create test result error: ${error.message}`);
+
+    if (error.name === 'ValidationError') {
+      const details = Object.values(error.errors || {}).map((e) => e.message);
+      throw new ValidationError('Test result validation failed', details);
+    }
+
     throw error;
   }
 };
@@ -242,7 +249,7 @@ export const deleteTestResult = async (testId, requesterId) => {
 export const getUserTestStatistics = async (userId) => {
   try {
     const stats = await TestResult.aggregate([
-      { $match: { userId: userId } },
+      { $match: { userId: new mongoose.Types.ObjectId(userId) } },
       {
         $group: {
           _id: null,

@@ -1,26 +1,129 @@
+// src/controllers/authController.js
 
-import authService from '../services/authService';
-import { sendSuccess, sendError } from '../utils/apiResponse';
-import { HTTP_STATUS } from '../config/constants';
+import * as authService from '../services/authService.js';
+import { sendSuccess } from '../utils/apiResponse.js';
+import { HTTP_STATUS } from '../config/constants.js';
+import { catchAsync } from '../middlewares/errorHandler.js';
 
 /**
- * Login controller
- * Handles HTTP request/response only
+ * Auth Controllers
+ * Handle authentication HTTP requests
  */
-const login = async (req, res, next) => {
-  try {
-    // 1. Extract data from request
-    const { email, password } = req.body;
-    
-    // 2. Call service (business logic)
-    const result = await authService.login(email, password);
-    
-    // 3. Send success response
-    sendSuccess(res, HTTP_STATUS.OK, 'Login successful', result);
-    
-  } catch (error) {
-    // 4. Pass error to error handler
-    next(error);
-  }
-};
-export{ login };
+
+// ========================================
+// REGISTER
+// ========================================
+
+/**
+ * @route   POST /api/auth/register
+ * @desc    Register new user
+ * @access  Public
+ */
+export const register = catchAsync(async (req, res) => {
+  const { name, email, password, age, gender, phone } = req.body;
+  
+  const result = await authService.register({
+    name,
+    email,
+    password,
+    age,
+    gender,
+    phone
+  });
+  
+  sendSuccess(
+    res,
+    HTTP_STATUS.CREATED,
+    'Registration successful',
+    result
+  );
+});
+
+// ========================================
+// LOGIN
+// ========================================
+
+/**
+ * @route   POST /api/auth/login
+ * @desc    Login user
+ * @access  Public
+ */
+export const login = catchAsync(async (req, res) => {
+  const { email, password } = req.body;
+  
+  const result = await authService.login(email, password);
+  
+  sendSuccess(
+    res,
+    HTTP_STATUS.OK,
+    'Login successful',
+    result
+  );
+});
+
+// ========================================
+// GET CURRENT USER
+// ========================================
+
+/**
+ * @route   GET /api/auth/me
+ * @desc    Get current logged-in user
+ * @access  Private
+ */
+export const getCurrentUser = catchAsync(async (req, res) => {
+  const userId = req.user._id;
+  
+  const user = await authService.getCurrentUser(userId);
+  
+  sendSuccess(
+    res,
+    HTTP_STATUS.OK,
+    'User retrieved successfully',
+    { user }
+  );
+});
+
+// ========================================
+// LOGOUT
+// ========================================
+
+/**
+ * @route   POST /api/auth/logout
+ * @desc    Logout user
+ * @access  Private
+ */
+export const logout = catchAsync(async (req, res) => {
+  const userId = req.user._id;
+  
+  await authService.logout(userId);
+  
+  sendSuccess(
+    res,
+    HTTP_STATUS.OK,
+    'Logout successful',
+    null
+  );
+});
+
+// ========================================
+// CHANGE PASSWORD
+// ========================================
+
+/**
+ * @route   PATCH /api/auth/password
+ * @desc    Change password
+ * @access  Private
+ */
+export const changePassword = catchAsync(async (req, res) => {
+  const userId = req.user._id;
+  const { currentPassword, newPassword } = req.body;
+  
+  await authService.changePassword(userId, currentPassword, newPassword);
+  
+  sendSuccess(
+    res,
+    HTTP_STATUS.OK,
+    'Password updated successfully',
+    null
+  );
+});

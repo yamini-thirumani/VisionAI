@@ -79,14 +79,20 @@ const testResultSchema = new mongoose.Schema({
     averageDistance: {
       type: Number,
       required: [true, 'Average distance is required'],
-      min: [30, 'Distance cannot be less than 30cm'],
-      max: [100, 'Distance cannot exceed 100cm']
+      min: [20, 'Distance cannot be less than 20cm'],
+      max: [150, 'Distance cannot exceed 150cm']
     },
     
     lightingLevel: {
       type: Number,
       min: [0, 'Lighting level cannot be negative'],
       max: [300, 'Lighting level cannot exceed 300 lux']
+    },
+
+    lightingQuality: {
+      type: String,
+      enum: ['OPTIMAL', 'TOO_DARK', 'TOO_BRIGHT', 'GLARE_DETECTED', 'UNKNOWN'],
+      default: 'UNKNOWN'
     },
     
     violations: [{
@@ -182,8 +188,8 @@ const testResultSchema = new mongoose.Schema({
     },
     distance: {
       type: Number,
-      min: 30,
-      max: 100
+      min: 20,
+      max: 150
     }
   }],
   

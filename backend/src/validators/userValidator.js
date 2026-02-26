@@ -82,7 +82,20 @@ export const updateProfileSchema = Joi.object({
         'date.max': 'Last eye exam date cannot be in the future'
       })
   })
-  .optional()
+  .optional(),
+
+  calibration: Joi.object({
+    K: Joi.number()
+      .min(10)
+      .max(1000)
+      .required()
+      .messages({
+        'number.base': 'Calibration constant K must be a number',
+        'number.min': 'Calibration constant K seems too small',
+        'number.max': 'Calibration constant K seems too large',
+        'any.required': 'Calibration constant K is required'
+      })
+  }).optional()
 })
 .min(1)  // At least one field must be provided
 .messages({

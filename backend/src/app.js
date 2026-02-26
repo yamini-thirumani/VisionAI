@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { RATE_LIMIT } from './config/constants.js';
 import logger from './utils/logger.js';
 import { errorHandler } from './middlewares/errorHandler.js';
-
+import apiRoutes from './routes/index.js';
 const app = express();
 
 // ========================================
@@ -18,7 +18,7 @@ const app = express();
 app.use(helmet());
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true
 }));
 
@@ -41,7 +41,15 @@ app.use('/api/', limiter);
 // ========================================
 // ROUTES
 // ========================================
+// ========================================
+// API ROUTES
+// ========================================
 
+// API info
+app.get('/api', apiRoutes);
+
+// Mount all API routes
+app.use('/api', apiRoutes);
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     success: true,
@@ -50,7 +58,7 @@ app.get('/api/health', (req, res) => {
     environment: process.env.NODE_ENV
   });
 });
-
+app.use('/api', apiRoutes);
 // API Routes will be added here
 // app.use('/api/auth', authRoutes);
 // app.use('/api/users', userRoutes);

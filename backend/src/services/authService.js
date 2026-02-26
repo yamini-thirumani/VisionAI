@@ -2,13 +2,14 @@
 
 import User from '../models/User.js';
 import { generateToken } from '../config/jwt.js';
+import logger from '../utils/logger.js';
 import {
   ValidationError,
   AuthenticationError,
   NotFoundError,
   ConflictError
 } from '../utils/errorTypes.js';
-import logger from '../utils/logger.js';
+
 
 /**
  * Auth Service

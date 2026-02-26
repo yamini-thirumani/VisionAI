@@ -1,4 +1,4 @@
-import {HTTP_STATUS} from '../config/constants';
+import { HTTP_STATUS } from '../config/constants.js';
 
 export const sendSuccess = (res, statusCode = HTTP_STATUS.OK, message = 'Success', data = null) => {
     const response = {
@@ -9,13 +9,13 @@ export const sendSuccess = (res, statusCode = HTTP_STATUS.OK, message = 'Success
     return res.status(statusCode).json(response);
 };
 
-export const sendError = (res, statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR, message = 'Error', data = null) => {
-    const response = {
-        success : false,
-        message,
-        ...(errors && { errors }) 
-    };
-    return res.status(statusCode).json(response);
+export const sendError = (res, statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR, message = 'Error', errors = null) => {
+  const response = {
+    success: false,
+    message,
+    ...(errors && { errors })
+  };
+  return res.status(statusCode).json(response);
 };
 
 export const sendPaginated = (res, data, pagination) => {
@@ -33,10 +33,4 @@ export const sendPaginated = (res, data, pagination) => {
   };
 
   return res.status(HTTP_STATUS.OK).json(response);
-};
-
-export{
-  sendSuccess,
-  sendError,
-  sendPaginated
 };

@@ -35,7 +35,15 @@ export const validate = (schema, source = 'body') => {
     }
     
     // Replace original data with validated/sanitized data
-    req[source] = value;
+    // NOTE: On Express 5, some request properties (like `query`) are
+    // getter-only, so we must avoid reassigning them directly.
+    if (source === 'query') {
+      // Attach validated query data to a dedicated property
+      // without attempting to overwrite `req.query` itself.
+      req.validatedQuery = value;
+    } else {
+      req[source] = value;
+    }
     
     // Move to next middleware
     next();

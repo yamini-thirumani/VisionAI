@@ -125,11 +125,23 @@ export const generateTrendAnalysis = async (userId, period = 'all') => {
       status: 'completed'
     }).sort({ createdAt: 1 });
     
+    // Extract data points
     if (tests.length === 0) {
-      throw new NotFoundError('No test results found for this period');
+      return {
+        userId,
+        period,
+        testCount: 0,
+        dateRange: null,
+        dataPoints: [],
+        analysis: {
+          trend: null,
+          changeRate: 0,
+          recommendation:
+            'No test data available for this period. Take a vision test to start tracking your trend.'
+        }
+      };
     }
     
-    // Extract data points
     const dataPoints = tests.map(test => ({
       date: test.createdAt.toISOString().split('T')[0],
       snellen: test.visualAcuity.snellen,
@@ -187,4 +199,57 @@ function getClassificationSeverity(classification) {
     'moderate-myopia': 3,
     'severe-myopia': 4
   };
-  return severityMap[classification] || 0
+  return severityMap[classification] || 0;
+}
+/**
+
+Get reliability rating
+*/
+function getReliabilityRating(confidenceScore) {
+if (confidenceScore >= 90) return 'Excellent';
+if (confidenceScore >= 80) return 'Good';
+if (confidenceScore >= 70) return 'Fair';
+if (confidenceScore >= 60) return 'Moderate';
+return 'Poor';
+}
+
+/**
+
+Analyze trend direction
+*/
+function analyzeTrendDirection(tests) {
+if (tests.length < 2) {
+return {
+trend: 'insufficient-data',
+changeRate: 0,
+recommendation: 'Take more tests to establish a trend'
+};
+}
+
+// Compare first and last test
+const firstTest = tests[0];
+const lastTest = tests[tests.length - 1];
+const firstLogMAR = firstTest.visualAcuity.logMAR;
+const lastLogMAR = lastTest.visualAcuity.logMAR;
+const change = lastLogMAR - firstLogMAR;
+let trend, recommendation;
+if (Math.abs(change) < 0.1) {
+trend = 'stable';
+recommendation = 'Vision appears stable. Continue regular monitoring.';
+} else if (change > 0) {
+trend = 'declining';
+recommendation = 'Vision appears to be declining. Consider scheduling a comprehensive eye examination.';
+} else {
+trend = 'improving';
+recommendation = 'Vision appears to be improving. Continue current eye care practices.';
+}
+return {
+trend,
+changeRate: Math.abs(change),
+recommendation
+};
+}
+export default {
+generateTestReport,
+generateTrendAnalysis
+};
