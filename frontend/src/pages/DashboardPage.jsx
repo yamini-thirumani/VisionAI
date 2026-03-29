@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 import { testApi } from '../api/testApi';
 import { reportApi } from '../api/reportApi';
 import { Link } from 'react-router-dom';
+import { cell } from '../utils/display';
 import {
   ResponsiveContainer,
   LineChart,
@@ -29,11 +30,12 @@ function DashboardPage() {
 
   const loadDashboardData = async () => {
     try {
+      const uid = user?.id || user?._id;
       const [statsRes, latestRes, trendRes, historyRes] = await Promise.all([
-        testApi.getStatistics(user.id),
-        testApi.getLatestTest(user.id).catch(() => ({ data: { data: { test: null } } })),
-        reportApi.getTrendAnalysis(user.id, 'all').catch(() => null),
-        testApi.getUserTests(user.id, { page: 1, limit: 5 }).catch(() => ({ data: { data: [] } }))
+        testApi.getStatistics(uid),
+        testApi.getLatestTest(uid).catch(() => ({ data: { data: { test: null } } })),
+        reportApi.getTrendAnalysis(uid, 'all').catch(() => null),
+        testApi.getUserTests(uid, { page: 1, limit: 5 }).catch(() => ({ data: { data: [] } }))
       ]);
       
       setStats(statsRes.data.data.statistics);
@@ -94,25 +96,17 @@ function DashboardPage() {
 
   return (
     <div className="container mx-auto p-8">
-      <h1 className="text-3xl font-bold mb-8">Welcome, {user?.name}!</h1>
+      <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900 mb-8">
+        Welcome, {user?.name}
+      </h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="bg-white p-6 rounded-lg shadow">
-          <h3 className="text-gray-600 mb-2">Total Tests</h3>
+          <h3 className="text-gray-600 mb-2">Total tests</h3>
           <p className="text-3xl font-bold">{stats?.totalTests || 0}</p>
         </div>
-        
         <div className="bg-white p-6 rounded-lg shadow">
-          <h3 className="text-gray-600 mb-2">Avg Confidence</h3>
-          <p className="text-3xl font-bold">{stats?.avgConfidence || 0}%</p>
-        </div>
-        
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h3 className="text-gray-600 mb-2">Avg Accuracy</h3>
-          <p className="text-3xl font-bold">{stats?.avgAccuracy || 0}%</p>
-        </div>
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h3 className="text-gray-600 mb-2">Last Test Date</h3>
+          <h3 className="text-gray-600 mb-2">Last test</h3>
           <p className="text-sm font-semibold">
             {latestTest?.createdAt
               ? new Date(latestTest.createdAt).toLocaleString()
@@ -141,9 +135,9 @@ function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           {trendData.length > 0 && (
             <div className="bg-white p-6 rounded-lg shadow">
-              <h2 className="text-xl font-bold mb-4">Vision Trend (Snellen)</h2>
+              <h2 className="text-xl font-bold mb-4">Vision trend (Snellen)</h2>
               <p className="text-sm text-gray-500 mb-4">
-                Snellen denominator over time (lower is better), alongside test confidence.
+                Snellen line over your tests (smaller bottom number = sharper, e.g. 20/20).
               </p>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
@@ -151,32 +145,16 @@ function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                     <YAxis
-                      yAxisId="left"
                       tick={{ fontSize: 10 }}
                       domain={['auto', 'auto']}
                       reversed
                     />
-                    <YAxis
-                      yAxisId="right"
-                      orientation="right"
-                      tick={{ fontSize: 10 }}
-                      domain={[0, 100]}
-                    />
                     <Tooltip />
                     <Line
-                      yAxisId="left"
                       type="monotone"
                       dataKey="snellenDenominator"
-                      name="Snellen denominator"
+                      name="Snellen (denominator)"
                       stroke="#2563eb"
-                      dot={{ r: 2 }}
-                    />
-                    <Line
-                      yAxisId="right"
-                      type="monotone"
-                      dataKey="confidenceScore"
-                      name="Confidence (%)"
-                      stroke="#10b981"
                       dot={{ r: 2 }}
                     />
                   </LineChart>
@@ -235,7 +213,7 @@ function DashboardPage() {
                       {createdAt ? createdAt.toLocaleString() : ''}
                     </p>
                     <p className="font-semibold">
-                      {test.visualAcuity?.snellen || '—'} ·{' '}
+                      {cell(test.visualAcuity?.snellen)} ·{' '}
                       <span className="capitalize">
                         {test.classification?.replace('-', ' ') || ''}
                       </span>
@@ -243,12 +221,9 @@ function DashboardPage() {
                   </div>
                   <div className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <span className="text-xs text-gray-500">Trend</span>
+                      <span className="text-xs text-gray-500">vs previous</span>
                       <span className={`text-lg font-bold ${arrowColor}`}>{arrow}</span>
                     </div>
-                    <p className="text-xs text-gray-500">
-                      Reliability {test.reliability?.confidenceScore ?? '—'}%
-                    </p>
                   </div>
                 </div>
               );

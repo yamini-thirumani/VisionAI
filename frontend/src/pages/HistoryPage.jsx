@@ -2,25 +2,47 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { testApi } from '../api/testApi';
 import { Link } from 'react-router-dom';
+import { downloadSummaryPdf } from '../utils/visionPdf';
+import { cell, NA } from '../utils/display';
 
 function HistoryPage() {
   const { user } = useAuth();
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
+  const [summaryBusy, setSummaryBusy] = useState(false);
+
+  const userId = user?.id || user?._id;
 
   useEffect(() => {
+    const loadHistory = async () => {
+      if (!userId) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const response = await testApi.getUserTests(userId, { page: 1, limit: 20 });
+        setTests(response.data.data || []);
+      } catch (error) {
+        console.error('Error loading history:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
     loadHistory();
-  }, []);
+  }, [userId]);
 
-  const loadHistory = async () => {
+  const handleDownloadSummary = async () => {
+    if (!userId) return;
+    setSummaryBusy(true);
     try {
-      const response = await testApi.getUserTests(user.id, { page: 1, limit: 20 });
-      setTests(response.data.data);
+      const response = await testApi.getUserTests(userId, { page: 1, limit: 100 });
+      const list = response.data?.data || [];
+      downloadSummaryPdf(list, user?.name || 'Patient');
     } catch (error) {
-      console.error('Error loading history:', error);
+      console.error('Error building summary PDF:', error);
     } finally {
-      setLoading(false);
+      setSummaryBusy(false);
     }
   };
 
@@ -51,7 +73,19 @@ function HistoryPage() {
 
   return (
     <div className="container mx-auto p-8">
-      <h1 className="text-3xl font-bold mb-8">Test History</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">Test history</h1>
+        {withTrend.length > 0 && (
+          <button
+            type="button"
+            onClick={handleDownloadSummary}
+            disabled={summaryBusy}
+            className="bg-white border border-gray-300 text-gray-800 px-5 py-2.5 rounded-lg hover:bg-gray-50 disabled:opacity-50 text-sm font-medium"
+          >
+            {summaryBusy ? 'Preparing PDF…' : 'Download summary PDF'}
+          </button>
+        )}
+      </div>
 
       {withTrend.length === 0 ? (
         <div className="text-center py-12">
@@ -95,12 +129,6 @@ function HistoryPage() {
                       <span className="text-sm text-gray-600">Trend</span>
                       <span className={`text-xl font-bold ${arrowColor}`}>{arrow}</span>
                     </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Reliability</p>
-                      <p className="text-xl font-bold">
-                        {test.reliability?.confidenceScore ?? '—'}%
-                      </p>
-                    </div>
                   </div>
                 </div>
 
@@ -109,24 +137,24 @@ function HistoryPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div>
                         <p className="text-xs uppercase text-gray-500 mb-1">LogMAR</p>
-                        <p className="font-semibold">
-                          {test.visualAcuity?.logMAR ?? '—'}
+                        <p className="font-semibold tabular-nums">
+                          {cell(test.visualAcuity?.logMAR)}
                         </p>
                       </div>
                       <div>
                         <p className="text-xs uppercase text-gray-500 mb-1">Decimal</p>
-                        <p className="font-semibold">
-                          {test.visualAcuity?.decimal ?? '—'}
+                        <p className="font-semibold tabular-nums">
+                          {cell(test.visualAcuity?.decimal)}
                         </p>
                       </div>
                       <div>
                         <p className="text-xs uppercase text-gray-500 mb-1">
                           Avg Distance
                         </p>
-                        <p className="font-semibold">
+                        <p className="font-semibold tabular-nums">
                           {test.testConditions?.averageDistance != null
                             ? `${test.testConditions.averageDistance} cm`
-                            : '—'}
+                            : NA}
                         </p>
                       </div>
                       <div>

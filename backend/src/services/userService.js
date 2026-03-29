@@ -94,9 +94,12 @@ export const updateUserProfile = async (userId, updateData) => {
             ...user.medicalHistory.toObject(),
             ...updateData.medicalHistory
           };
-        } else if (key === 'calibration' && user.calibration) {
+        } else if (key === 'calibration') {
+          const prev =
+            user.calibration?.toObject?.() ||
+            (user.calibration && typeof user.calibration === 'object' ? { ...user.calibration } : {});
           user.calibration = {
-            ...user.calibration.toObject?.() || user.calibration,
+            ...prev,
             ...updateData.calibration,
             lastCalibratedAt: new Date()
           };

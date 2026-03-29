@@ -29,6 +29,17 @@ class ScoreCalculator {
       classification
     };
   }
+
+  /**
+   * Higher Snellen denominator = worse acuity. Used to pick the eye that drives screening classification.
+   */
+  pickWorseVisualAcuity(vaA, vaB) {
+    if (!vaA || !vaA.snellen) return vaB;
+    if (!vaB || !vaB.snellen) return vaA;
+    const da = parseInt(vaA.snellen.split('/')[1], 10);
+    const db = parseInt(vaB.snellen.split('/')[1], 10);
+    return da >= db ? vaA : vaB;
+  }
 }
 
 export default ScoreCalculator;

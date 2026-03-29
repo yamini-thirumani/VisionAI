@@ -46,9 +46,6 @@ app.use('/api/', limiter);
 // ========================================
 
 // API info
-app.get('/api', apiRoutes);
-
-// Mount all API routes
 app.use('/api', apiRoutes);
 app.get('/api/health', (req, res) => {
   res.status(200).json({
@@ -58,7 +55,6 @@ app.get('/api/health', (req, res) => {
     environment: process.env.NODE_ENV
   });
 });
-app.use('/api', apiRoutes);
 // API Routes will be added here
 // app.use('/api/auth', authRoutes);
 // app.use('/api/users', userRoutes);

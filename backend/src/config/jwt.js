@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { AuthenticationError } from '../utils/errorTypes.js';
 
 const generateToken = (payload) =>{
     return jwt.sign(payload, process.env.JWT_SECRET,{
@@ -13,13 +14,13 @@ const verifyToken = (token) =>{
     }
     catch(error){
         if (error.name === 'TokenExpiredError') {
-            throw new Error('Token has expired');
+            throw new AuthenticationError('Token has expired');
         } 
         else if (error.name === 'JsonWebTokenError') {
-            throw new Error('Invalid token');
+            throw new AuthenticationError('Invalid token');
         } 
         else {
-            throw new Error('Token verification failed');
+            throw new AuthenticationError('Token verification failed');
         }
     }
 };

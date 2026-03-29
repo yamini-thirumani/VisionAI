@@ -23,6 +23,7 @@ class PostureMonitor {
 
     // Yaw: horizontal deviation of nose from the midline between inner eye corners
     const eyeCenterX = (LEFT_EYE_INNER.x + RIGHT_EYE_INNER.x) / 2;
+    const eyeCenterY = (LEFT_EYE_INNER.y + RIGHT_EYE_INNER.y) / 2;
     const yawNorm = (NOSE_TIP.x - eyeCenterX) / Math.abs(RIGHT_EYE_INNER.x - LEFT_EYE_INNER.x || 1);
     const yaw = yawNorm * 90;
 
@@ -34,7 +35,7 @@ class PostureMonitor {
     const roll = eyeAngle * (180 / Math.PI);
 
     // Pitch: relative vertical position of nose vs eye–mouth midline
-    const midFaceY = (eyeCenterX + (LEFT_MOUTH.y + RIGHT_MOUTH.y) / 2) / 2;
+    const midFaceY = (eyeCenterY + (LEFT_MOUTH.y + RIGHT_MOUTH.y) / 2) / 2;
     const faceHeight = Math.abs(CHIN.y - LEFT_EYE_INNER.y) || 1;
     const pitchNorm = (NOSE_TIP.y - midFaceY) / faceHeight;
     const pitch = pitchNorm * 90;

@@ -219,16 +219,62 @@
 // export default TestPage;
 
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { testApi } from '../api/testApi';
-import FaceDetection from '../modules/computerVision/FaceDetection';
+import FaceDetection, { detectGlasses } from '../modules/computerVision/FaceDetection';
 import DistanceCalculator from '../modules/computerVision/DistanceCalculator';
 import PostureMonitor from '../modules/computerVision/PosterMonitor';
 import SpeechRecognitionService from '../modules/voiceInteraction/SpeechRecognition';
 import SpeechSynthesisService from '../modules/voiceInteraction/SpeechSynthesis';
-import OptotypeGenerator from '../modules/testEngine/OptotypeGenerator';
+import OptotypeGenerator, {
+  LETTERS_PER_SCREENING_LEVEL,
+  CORRECT_TO_PASS_LEVEL
+} from '../modules/testEngine/OptotypeGenerator';
 import ScoreCalculator from '../modules/testEngine/ScoreCalculator';
+import {
+  HiOutlineVideoCamera,
+  HiOutlineArrowsPointingOut,
+  HiOutlineSun,
+  HiOutlineHandRaised,
+  HiOutlineArrowsRightLeft,
+  HiOutlineEye
+} from 'react-icons/hi2';
+import {
+  hasCalibrationForSession,
+  applyCalibrationFromUser,
+  acknowledgeApproximateResultsThisSession,
+  getCalibrationSourceForPayload,
+  readStoredCalibrationK
+} from '../utils/calibration';
+
+function VisualTestSteps() {
+  const steps = [
+    { Icon: HiOutlineVideoCamera, text: 'Allow camera' },
+    { Icon: HiOutlineArrowsPointingOut, text: 'Arm’s length (~50 cm)' },
+    { Icon: HiOutlineSun, text: 'Bright, no glare' },
+    { Icon: HiOutlineHandRaised, text: 'Cover other eye when asked' },
+    { Icon: HiOutlineArrowsRightLeft, text: 'E rotates: say where the gap opens' }
+  ];
+  return (
+    <div
+      className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 mb-6"
+      aria-label="Quick test steps"
+    >
+      {steps.map(({ Icon, text }, idx) => (
+        <div
+          key={idx}
+          className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2 py-3 text-center shadow-sm"
+        >
+          <Icon className="h-7 w-7 sm:h-8 sm:w-8 text-blue-600 shrink-0" aria-hidden />
+          <span className="text-[10px] sm:text-xs font-medium text-slate-700 leading-tight">
+            {text}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function TestPage() {
   const { user } = useAuth();
@@ -236,15 +282,17 @@ function TestPage() {
   const videoRef = useRef(null);
 
   // Core test state
-  const [stage, setStage] = useState('setup'); // setup, calibration, testing, complete
+  const [stage, setStage] = useState('setup'); // setup, calibration_gate, calibration, eye_prep_right, eye_prep_left, testing, paused, complete
+  const [skipApproxAck, setSkipApproxAck] = useState(false);
   const [testSessionId, setTestSessionId] = useState(null);
   const [testItems, setTestItems] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentEye, setCurrentEye] = useState('right'); // OD / OS monocular flow
   const [currentOptotype, setCurrentOptotype] = useState('');
   const [responses, setResponses] = useState([]);
   const [visualResult, setVisualResult] = useState(null);
   const [reliabilitySummary, setReliabilitySummary] = useState(null);
-  const LETTERS_PER_LEVEL = 5;
+  const LETTERS_PER_LEVEL = LETTERS_PER_SCREENING_LEVEL;
 
   // Environment and guidance
   const [distance, setDistance] = useState(null);
@@ -255,6 +303,11 @@ function TestPage() {
   const [faceDetected, setFaceDetected] = useState(false);
   const [message, setMessage] = useState('Initializing camera and sensors...');
   const [initializationError, setInitializationError] = useState(null);
+  const [showGlassesWarning, setShowGlassesWarning] = useState(false);
+
+  // Glases warning is shown only once per test session (not per frame).
+  const glassesWarningShownRef = useRef(false);
+  const glassesDetectedRef = useRef(false);
 
   // Voice + input
   const [voiceSupported, setVoiceSupported] = useState(true);
@@ -270,34 +323,34 @@ function TestPage() {
   const countdownIntervalRef = useRef(null);
   const activePromptIdRef = useRef(0);
   const lastPassedLevelRef = useRef(null);
+  const responsesRef = useRef([]);
+  const currentEyeRef = useRef('right');
+  const visualAcuityByEyeRef = useRef({ right: null, left: null });
   const violationStartRef = useRef(null);
   const violationReasonRef = useRef(null);
   const pauseStartRef = useRef(null);
   const pauseEventsRef = useRef([]);
   const resumeIntervalRef = useRef(null);
 
-  const normalizeVoiceInput = (transcript) => {
+  const normalizeDirectionInput = (input) => {
     const map = {
-      see: 'C',
-      sea: 'C',
-      dee: 'D',
-      el: 'L',
-      elle: 'L',
-      oh: 'O',
-      zero: 'O',
-      pee: 'P',
-      tea: 'T',
-      tee: 'T',
-      zee: 'Z',
-      zed: 'Z',
-      eat: 'E',
-      he: 'E',
-      ee: 'E',
-      eff: 'F',
-      if: 'F'
+      right: 'right',
+      left: 'left',
+      up: 'up',
+      down: 'down',
+      r: 'right',
+      l: 'left',
+      u: 'up',
+      d: 'down',
+      '->': 'right',
+      '=>': 'right',
+      '←': 'left',
+      '→': 'right',
+      '↑': 'up',
+      '↓': 'down'
     };
-    const clean = (transcript || '').toLowerCase().trim();
-    return map[clean] || clean.toUpperCase().charAt(0);
+    const clean = (input || '').toLowerCase().trim();
+    return map[clean] || null;
   };
 
   // Analyze lighting directly from the live camera element.
@@ -388,14 +441,24 @@ function TestPage() {
         const tests = optotypeGen.current.generateTest();
         if (!isMounted) return;
 
-        setTestItems(tests);
-        setStage('calibration');
-        setMessage('Please sit about 50 cm from the screen and look straight at the camera.');
+        applyCalibrationFromUser(user);
+        const kLs = readStoredCalibrationK();
+        if (kLs != null && distanceCalc.current) {
+          distanceCalc.current.setCalibrationFactor(kLs);
+        }
 
-        if (speechSynthesis.current) {
-          await speechSynthesis.current.speak(
-            'Please sit about fifty centimeters from the screen and look straight at the camera.'
-          );
+        setTestItems(tests);
+        const canPosition = hasCalibrationForSession();
+        setStage(canPosition ? 'calibration' : 'calibration_gate');
+        if (canPosition) {
+          setMessage('Please sit about 50 cm from the screen and look straight at the camera.');
+          if (speechSynthesis.current) {
+            await speechSynthesis.current.speak(
+              'Please sit about fifty centimeters from the screen and look straight at the camera.'
+            );
+          }
+        } else {
+          setMessage('');
         }
       } catch (error) {
         console.error('Initialization error:', error);
@@ -432,10 +495,15 @@ function TestPage() {
       setLightingStatus(lighting);
     }
 
+    // IMPORTANT: use these local, freshly computed values for logic decisions
+    // inside this callback (React state updates are async and may be stale).
+    let distValidation = null;
+    let postureValidation = null;
+
     if (!hasFace) {
       setPosture(null);
       setDistance(null);
-      if (stage !== 'setup') {
+      if (stage !== 'setup' && stage !== 'calibration_gate') {
         setMessage('Face not detected. Please sit facing the screen.');
       }
     }
@@ -447,33 +515,45 @@ function TestPage() {
       const landmarks = results.multiFaceLandmarks[0];
       const imageWidth = results.image?.width || videoRef.current?.videoWidth || 1280;
 
+      // Glasses detection (end-user warning + payload flag).
+      const glasses = detectGlasses(landmarks);
+      if (
+        !glassesWarningShownRef.current &&
+        glasses?.detected === true &&
+        glasses?.confidence > 0.6
+      ) {
+        glassesWarningShownRef.current = true;
+        glassesDetectedRef.current = true;
+        setShowGlassesWarning(true);
+      }
+
       dist = distanceCalc.current.calculateDistance(landmarks, imageWidth);
       pose = postureMonitor.current.calculateHeadPose(landmarks);
 
       if (dist != null) {
-        const distValidation = distanceCalc.current.validateDistance(dist);
+        distValidation = distanceCalc.current.validateDistance(dist);
         setDistance(dist);
         setDistanceStatus(distValidation);
       }
 
       if (pose) {
-        const postureValidation = postureMonitor.current.validatePosture(pose);
+        postureValidation = postureMonitor.current.validatePosture(pose);
         setPosture(pose);
         setPostureStatus(postureValidation);
       }
     }
 
     if (stage === 'calibration' && dist != null && pose) {
-      const distValidation = distanceCalc.current.validateDistance(dist);
-      const postureValidation = postureMonitor.current.validatePosture(pose);
+      const distValidationLocal = distValidation || distanceCalc.current.validateDistance(dist);
+      const postureValidationLocal = postureValidation || postureMonitor.current.validatePosture(pose);
 
-      if (distValidation.isValid && postureValidation.isValid && lightingStatus?.status === 'optimal' && hasFace) {
+      if (distValidationLocal.isValid && postureValidationLocal.isValid && lighting?.status === 'optimal' && hasFace) {
         setMessage('Perfect position. When you are ready, start the test.');
       } else {
         setMessage(
-          distValidation.message ||
-            postureValidation.message ||
-            lightingStatus?.message ||
+          distValidationLocal.message ||
+            postureValidationLocal.message ||
+            lighting?.message ||
             'Adjust your position and lighting.'
         );
       }
@@ -483,15 +563,15 @@ function TestPage() {
       hasFace &&
       dist != null &&
       pose &&
-      distanceStatus?.isValid &&
-      postureStatus?.isValid &&
-      lightingStatus?.status === 'optimal';
+      distValidation?.isValid &&
+      postureValidation?.isValid &&
+      lighting?.status === 'optimal';
 
     let failureReason = null;
     if (!hasFace) failureReason = 'Face not detected';
-    else if (!lightingStatus || lightingStatus.status !== 'optimal') failureReason = lightingStatus?.message || 'Lighting not optimal';
-    else if (!distanceStatus?.isValid) failureReason = distanceStatus?.message || 'Distance out of range';
-    else if (!postureStatus?.isValid) failureReason = postureStatus?.message || 'Posture not stable';
+    else if (!lighting || lighting.status !== 'optimal') failureReason = lighting?.message || 'Lighting not optimal';
+    else if (!distValidation?.isValid) failureReason = distValidation?.message || 'Distance out of range';
+    else if (!postureValidation?.isValid) failureReason = postureValidation?.message || 'Posture not stable';
 
     // Mid-test pause handling
     if (stage === 'testing') {
@@ -601,7 +681,7 @@ function TestPage() {
 
   const handleStartTest = async () => {
     if (!canStartTest()) return;
-    // Start a completely fresh test session
+    // Start a completely fresh test session (monocular: right eye then left eye)
     const freshSessionId = Date.now().toString();
     const freshItems = optotypeGen.current.generateTest();
 
@@ -610,17 +690,48 @@ function TestPage() {
     setCurrentIndex(0);
     setCurrentOptotype('');
     setResponses([]);
+    responsesRef.current = [];
     setVisualResult(null);
     setReliabilitySummary(null);
     setMessage('');
     lastPassedLevelRef.current = null;
+    visualAcuityByEyeRef.current = { right: null, left: null };
+    currentEyeRef.current = 'right';
+    setCurrentEye('right');
     violationStartRef.current = null;
     violationReasonRef.current = null;
     pauseStartRef.current = null;
     pauseEventsRef.current = [];
+    glassesWarningShownRef.current = false;
+    glassesDetectedRef.current = false;
+    setShowGlassesWarning(false);
 
+    setStage('eye_prep_right');
+    setMessage(
+      'Next we test each eye separately: first your right eye, then your left.'
+    );
+    if (speechSynthesis.current) {
+      await speechSynthesis.current.speak(
+        'Next we will test each eye separately. First cover your left eye so you only see with your right eye. Use your hand or a tissue. When you are ready, press continue.'
+      );
+    }
+  };
+
+  const canBeginEyeSession = () => canStartTest();
+
+  const handleBeginEyeSession = async (eye) => {
+    if (!canBeginEyeSession()) return;
+    currentEyeRef.current = eye;
+    setCurrentEye(eye);
+    lastPassedLevelRef.current = null;
+    setCurrentIndex(0);
+    setCurrentOptotype('');
+    if (eye === 'right') {
+      setResponses([]);
+      responsesRef.current = [];
+    }
     setStage('testing');
-    await presentNextOptotype(0, freshItems);
+    await presentNextOptotype(0, testItems);
   };
 
   const presentNextOptotype = async (index, items = testItems) => {
@@ -636,7 +747,7 @@ function TestPage() {
     setTimeLeft(null);
 
     if (index >= items.length) {
-      completeTest(responses, lastPassedLevelRef.current);
+      onEyeSessionComplete(responsesRef.current, lastPassedLevelRef.current);
       return;
     }
 
@@ -649,8 +760,8 @@ function TestPage() {
     questionStartRef.current = Date.now();
 
     const promptText = voiceSupported
-      ? 'What letter do you see? Please say the letter clearly.'
-      : 'What letter do you see? Please type the letter below.';
+      ? 'The E is rotated. Say which way the gap opens: right, left, up, or down.'
+      : 'The E is rotated. Type which way the gap opens: right, left, up, or down.';
 
     if (speechSynthesis.current) {
       await speechSynthesis.current.speak(promptText);
@@ -705,7 +816,7 @@ function TestPage() {
         speechRecognition.current.stopListening();
       }
 
-      setMessage("Time's up for this letter. Moving to the next one.");
+      setMessage("Time's up for this optotype. Moving to the next one.");
       if (speechSynthesis.current) {
         await speechSynthesis.current.speak("Time's up, moving on.");
       }
@@ -736,9 +847,9 @@ function TestPage() {
       return;
     }
 
-    const userAnswer = normalizeVoiceInput(transcript);
+    const userAnswer = normalizeDirectionInput(transcript);
     if (!userAnswer) {
-      setMessage('Voice not recognized. Please repeat or type your answer.');
+      setMessage('Direction not recognized. Please repeat or type right, left, up, or down.');
       return;
     }
     recordResponse(userAnswer, item);
@@ -749,7 +860,11 @@ function TestPage() {
     if (!manualInput || !testItems[currentIndex]) return;
 
     const item = testItems[currentIndex];
-    const userAnswer = manualInput.toUpperCase().trim().charAt(0);
+    const userAnswer = normalizeDirectionInput(manualInput);
+    if (!userAnswer) {
+      setMessage('Please type right, left, up, or down.');
+      return;
+    }
     setManualInput('');
     recordResponse(userAnswer, item);
   };
@@ -766,7 +881,7 @@ function TestPage() {
     }
     setTimeLeft(null);
 
-    const correct = userAnswer === item.optotype;
+    const correct = userAnswer === item.direction;
     const elapsedSeconds = questionStartRef.current
       ? Math.max(1, Math.round((Date.now() - questionStartRef.current) / 1000))
       : 2;
@@ -777,15 +892,19 @@ function TestPage() {
       userResponse: userAnswer,
       correct,
       responseTime: elapsedSeconds,
-      distance: distance ?? 50
+      distance: distance ?? 50,
+      eye: currentEyeRef.current
     };
 
     setResponses((prev) => {
       const updated = [...prev, response];
+      responsesRef.current = updated;
 
-      // Determine performance for this Snellen level
+      // Determine performance for this Snellen level (same eye only)
       const level = item.level;
-      const levelResponses = updated.filter((r) => r.level === level);
+      const levelResponses = updated.filter(
+        (r) => r.level === level && r.eye === currentEyeRef.current
+      );
       const lettersAnswered = levelResponses.length;
       const correctCount = levelResponses.filter((r) => r.correct).length;
 
@@ -795,7 +914,7 @@ function TestPage() {
         (testItems[currentIndex + 1] && testItems[currentIndex + 1].level !== level);
 
       if (isLastLetterOfLevel) {
-        if (correctCount >= 3) {
+        if (correctCount >= CORRECT_TO_PASS_LEVEL) {
           // Passed this level – advance to next level
           lastPassedLevelRef.current = level;
           let nextIndex = currentIndex + 1;
@@ -823,7 +942,7 @@ function TestPage() {
                     correct ? 'Correct.' : 'That is not correct.'
                   );
                 }
-                completeTest(updated, lastPassedLevelRef.current);
+                onEyeSessionComplete(updated, lastPassedLevelRef.current);
               })();
             }, 400);
           }
@@ -837,7 +956,7 @@ function TestPage() {
                   correct ? 'Correct.' : 'That is not correct.'
                 );
               }
-              completeTest(updated, finalLevel);
+              onEyeSessionComplete(updated, finalLevel);
             })();
           }, 400);
         }
@@ -864,7 +983,7 @@ function TestPage() {
                   correct ? 'Correct.' : 'That is not correct.'
                 );
               }
-              completeTest(updated, finalLevel);
+              onEyeSessionComplete(updated, finalLevel);
             })();
           }, 400);
         }
@@ -874,7 +993,31 @@ function TestPage() {
     });
   };
 
-  const completeTest = async (allResponses, lastPassedLevel = null) => {
+  const onEyeSessionComplete = async (allResponses, lastPassedLevelForSession = null) => {
+    const eye = currentEyeRef.current;
+    const slice = allResponses.filter((r) => r.eye === eye);
+    const va = scoreCalc.current.calculateScore(slice, lastPassedLevelForSession);
+
+    if (eye === 'right') {
+      visualAcuityByEyeRef.current.right = va;
+      lastPassedLevelRef.current = null;
+      setStage('eye_prep_left');
+      setMessage(
+        'Right eye (OD) screening is done. Next we will test your left eye only.'
+      );
+      if (speechSynthesis.current) {
+        await speechSynthesis.current.speak(
+          'Right eye screening is complete. Now cover your right eye with your hand so you only see with your left eye. Press continue when you are ready.'
+        );
+      }
+      return;
+    }
+
+    visualAcuityByEyeRef.current.left = va;
+    await finalizeAndSubmitTest(allResponses);
+  };
+
+  const finalizeAndSubmitTest = async (allResponses) => {
     setStage('complete');
     setMessage('Calculating your visual acuity...');
 
@@ -883,7 +1026,13 @@ function TestPage() {
       return;
     }
 
-    const visualAcuity = scoreCalc.current.calculateScore(allResponses, lastPassedLevel);
+    const vaRight = visualAcuityByEyeRef.current.right;
+    const vaLeft = visualAcuityByEyeRef.current.left;
+    if (!vaRight?.snellen || !vaLeft?.snellen) {
+      setMessage('Could not compute both eye scores. Please retake the test.');
+      return;
+    }
+    const visualAcuity = scoreCalc.current.pickWorseVisualAcuity(vaRight, vaLeft);
     setVisualResult(visualAcuity);
 
     const avgDistance = Math.round(
@@ -981,35 +1130,72 @@ function TestPage() {
       return {
         type,
         count: 1,
+        reason: p.reason || '',
+        durationSeconds: p.durationSeconds ?? 0,
         timestamp: new Date()
       };
     });
+
+    const clampedAvgDistance = Math.min(
+      150,
+      Math.max(20, Number.isFinite(avgDistance) ? avgDistance : 50)
+    );
+
+    const responsesForApi = allResponses.map((r) => {
+      const next = { ...r };
+      // Always send a string so JSON never omits the field (Mongoose requires userResponse).
+      next.userResponse =
+        typeof r.userResponse === 'string' ? r.userResponse.slice(0, 10) : '';
+      const d = r.distance;
+      if (d != null && Number.isFinite(Number(d))) {
+        next.distance = Math.min(150, Math.max(20, Number(d)));
+      } else {
+        delete next.distance;
+      }
+      return next;
+    });
+
+    const eyePayload = (v) =>
+      v && typeof v === 'object'
+        ? {
+            snellen: v.snellen,
+            logMAR: v.logMAR,
+            ...(v.decimal != null ? { decimal: v.decimal } : {})
+          }
+        : v;
 
     const testData = {
       visualAcuity: {
         snellen: visualAcuity.snellen,
         logMAR: visualAcuity.logMAR,
-        decimal: visualAcuity.decimal,
-        accuracyPercentage: visualAcuity.accuracyPercentage
+        decimal: visualAcuity.decimal
+      },
+      visualAcuityByEye: {
+        right: eyePayload(vaRight),
+        left: eyePayload(vaLeft)
       },
       classification: visualAcuity.classification,
       testConditions: {
-        averageDistance: avgDistance || 50,
+        averageDistance: clampedAvgDistance,
         lightingLevel: lightingStatus?.mean ? Math.round(lightingStatus.mean) : 100,
         lightingQuality: lightingStatus?.quality || 'UNKNOWN',
-        violations
+        testMode: 'monocular',
+        distanceCalibrationSource: getCalibrationSourceForPayload(),
+        violations,
+        ...(glassesDetectedRef.current ? { glassesDetected: true } : {})
       },
       reliability,
-      responses: allResponses,
+      responses: responsesForApi,
       testDuration: Math.max(60, totalDuration)
     };
 
     try {
       const res = await testApi.createTest(testData);
-      const createdId = res.data?.data?.test?._id;
+      const rawId = res.data?.data?.test?._id;
+      const createdId = rawId != null ? String(rawId) : null;
       if (speechSynthesis.current) {
         await speechSynthesis.current.speak(
-          `Your test is complete. Your visual acuity is ${visualAcuity.snellen}. Redirecting to your dashboard.`
+          `Your test is complete. Right eye ${vaRight.snellen}, left eye ${vaLeft.snellen}. Overall screening result ${visualAcuity.snellen}, based on the weaker eye.`
         );
       }
       setMessage('Test complete. Preparing your detailed results...');
@@ -1020,20 +1206,95 @@ function TestPage() {
       }
     } catch (error) {
       console.error('Error saving test:', error);
-      setMessage('Error saving results. Please try again from a stable connection.');
+      const apiErrors = error?.response?.data?.errors;
+      const detail =
+        Array.isArray(apiErrors) && apiErrors.length > 0
+          ? (typeof apiErrors[0] === 'string'
+              ? apiErrors.join(' ')
+              : apiErrors.map((e) => e?.message || e?.field || String(e)).join(' '))
+          : null;
+      const apiMsg = error?.response?.data?.message;
+      setMessage(
+        detail ||
+          apiMsg ||
+          (error?.message?.includes('Network Error')
+            ? 'Cannot reach the server. Check the API is running and VITE_API_URL if you use a custom backend URL.'
+            : 'Error saving results. Please try again from a stable connection.')
+      );
     }
   };
 
-  const currentLevel = testItems[currentIndex]?.level;
+  useEffect(() => {
+    const keyToDirection = {
+      ArrowRight: 'right',
+      ArrowLeft: 'left',
+      ArrowUp: 'up',
+      ArrowDown: 'down'
+    };
+
+    const handleKeyDown = (e) => {
+      const answer = keyToDirection[e.key];
+      if (!answer) return;
+      if (stage !== 'testing') return;
+
+      const item = testItems[currentIndex];
+      if (!item) return;
+
+      e.preventDefault();
+      recordResponse(answer, item);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [stage, currentIndex, testItems]);
+
+  const currentItem = testItems[currentIndex];
+  const currentLevel = currentItem?.level;
   const currentDenominator = currentLevel ? parseInt(currentLevel.split('/')[1]) : 200;
-  const effectiveDistance = distance ?? 50;
-  const optotypeSizePx = optotypeGen.current.calculateSize(currentDenominator, effectiveDistance);
+  const getOptotypeDistanceCm = (d, status) => {
+    if (d == null || !Number.isFinite(d)) return 50;
+    if (d >= 142) return 50;
+    if (status?.isValid) return Math.min(d, 95);
+    return 50;
+  };
+  const optotypeDistanceCm = getOptotypeDistanceCm(distance, distanceStatus);
+  const distanceUnreliableForSizing =
+    distance != null && (distance >= 142 || !distanceStatus?.isValid);
+  const optotypeSizePx = optotypeGen.current.calculateSize(
+    currentDenominator,
+    optotypeDistanceCm
+  );
+  const directionToRotation = {
+    right: 'rotate(0deg)',
+    left: 'rotate(180deg)',
+    up: 'rotate(270deg)',
+    down: 'rotate(90deg)'
+  };
+  const dPadButtons = [
+    { key: 'up', icon: '↑', row: '1', col: '2' },
+    { key: 'left', icon: '←', row: '2', col: '1' },
+    { key: 'right', icon: '→', row: '2', col: '3' },
+    { key: 'down', icon: '↓', row: '3', col: '2' }
+  ];
 
   return (
     <div className="container mx-auto p-8">
-      <h1 className="text-3xl font-bold mb-1">Vision Test</h1>
-      <p className="text-sm text-gray-500 mb-6">
-        AI-assisted, self-calibrating screening using your camera and microphone.
+      <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900 mb-1">Vision test</h1>
+      <p className="text-sm text-gray-600 mb-3">
+        One eye at a time. Icons below = what to do.
+      </p>
+      <VisualTestSteps />
+      <p className="text-xs text-gray-500 mb-6">
+        <Link
+          to="/calibration"
+          state={{ returnTo: '/test' }}
+          className="text-blue-600 hover:underline font-medium"
+        >
+          Open calibration
+        </Link>{' '}
+        if you skipped the step at the start (a ruler for your webcam, not AI training).
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1059,6 +1320,12 @@ function TestPage() {
                 </p>
                 {distanceStatus && (
                   <p className="text-[11px] text-slate-300">{distanceStatus.message}</p>
+                )}
+                {distanceUnreliableForSizing && (
+                  <p className="text-[10px] text-amber-200 mt-1">
+                    Letter size uses ~50 cm (nominal) because distance is uncertain. Calibrate on
+                    the calibration page for better letter sizing.
+                  </p>
                 )}
               </div>
               <div className="text-right">
@@ -1135,13 +1402,85 @@ function TestPage() {
             </div>
           )}
 
+          {stage === 'calibration_gate' && (
+            <div className="text-center max-w-md mx-auto space-y-5">
+              <div className="rounded-2xl border-2 border-blue-200 bg-blue-50/80 px-4 py-5">
+                <p className="text-lg font-semibold text-slate-900 mb-2">First: calibrate distance</p>
+                <p className="text-sm text-slate-700 mb-4 leading-snug">
+                  Your Snellen score only makes sense if the “E” is sized for <strong>your</strong>{' '}
+                  screen and <strong>how far you sit</strong>. Two minutes, one credit card.
+                </p>
+                <Link
+                  to="/calibration"
+                  state={{ returnTo: '/test' }}
+                  className="inline-flex w-full justify-center rounded-xl bg-emerald-600 text-white font-semibold py-3 px-4 hover:bg-emerald-700"
+                >
+                  Calibrate now (recommended)
+                </Link>
+              </div>
+              <div className="text-xs text-slate-500 uppercase tracking-wide">or</div>
+              <div className="text-left rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-4 space-y-3">
+                <label className="flex gap-3 items-start cursor-pointer text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    className="mt-1 rounded border-slate-300"
+                    checked={skipApproxAck}
+                    onChange={(e) => setSkipApproxAck(e.target.checked)}
+                  />
+                  <span>
+                    I understand this is <strong>screening only</strong> and without calibration
+                    the letter size and distance are <strong>rough estimates</strong>; results are
+                    less meaningful.
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  disabled={!skipApproxAck}
+                  onClick={() => {
+                    acknowledgeApproximateResultsThisSession();
+                    setStage('calibration');
+                    setMessage(
+                      'Please sit about 50 cm from the screen and look straight at the camera.'
+                    );
+                    if (speechSynthesis.current) {
+                      speechSynthesis.current.speak(
+                        'Please sit about fifty centimeters from the screen and look straight at the camera.'
+                      );
+                    }
+                  }}
+                  className={`w-full py-2.5 rounded-lg text-sm font-semibold ${
+                    skipApproxAck
+                      ? 'bg-slate-700 text-white hover:bg-slate-800'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  Continue without calibrating
+                </button>
+              </div>
+            </div>
+          )}
+
           {stage === 'calibration' && (
             <div className="text-center max-w-md">
-              <p className="text-lg mb-4">{message}</p>
-              <p className="text-sm text-gray-500 mb-6">
-                Keep both eyes visible, sit comfortably, and maintain a distance of around
-                40–60 cm. We continuously monitor your position while you take the test.
-              </p>
+              <div className="flex justify-center gap-3 mb-3 text-blue-600" aria-hidden>
+                <HiOutlineEye className="h-10 w-10" />
+                <HiOutlineEye className="h-10 w-10" />
+              </div>
+              <p className="text-lg font-medium mb-2">{message}</p>
+              <ul className="text-sm text-gray-600 mb-6 space-y-1.5 text-left max-w-xs mx-auto list-none">
+                <li className="flex gap-2 items-start">
+                  <span className="text-blue-600 font-bold">1</span>
+                  <span>Both eyes open, face the camera.</span>
+                </li>
+                <li className="flex gap-2 items-start">
+                  <span className="text-blue-600 font-bold">2</span>
+                  <span>Wait until distance &amp; lighting show OK (green).</span>
+                </li>
+                <li className="flex gap-2 items-start">
+                  <span className="text-blue-600 font-bold">3</span>
+                  <span>Press Start, then we test each eye alone.</span>
+                </li>
+              </ul>
               <button
                 onClick={handleStartTest}
                 disabled={!canStartTest()}
@@ -1156,94 +1495,215 @@ function TestPage() {
             </div>
           )}
 
-          {(stage === 'testing' || stage === 'paused') && testItems[currentIndex] && (
-            <div className="text-center w-full max-w-md">
-              <div
-                className="font-bold mb-8 transition-all duration-300"
-                style={{ fontSize: `${optotypeSizePx}px`, lineHeight: 1 }}
-              >
-                {currentOptotype}
+          {stage === 'eye_prep_right' && (
+            <div className="text-center max-w-lg">
+              <p className="text-lg font-semibold text-gray-900 mb-1">Step A: Right eye</p>
+              <div className="flex justify-center items-center gap-2 mb-3 text-5xl text-slate-400">
+                <HiOutlineHandRaised className="text-amber-600 h-12 w-12" aria-hidden />
+                <span className="text-2xl">→</span>
+                <HiOutlineEye className="text-blue-600 h-14 w-14" />
               </div>
+              <p className="text-sm text-gray-700 mb-4 font-medium">
+                Cover your <strong>left</strong> eye. Look with <strong>right</strong> only.
+              </p>
+              <p className="text-xs text-gray-600 mb-3">
+                You’ll see a rotating <strong>E</strong>: pick which way the <strong>gap</strong> opens (same as
+                the D-pad).
+              </p>
+              <p className="text-xs text-gray-500 mb-4">Don’t block the camera.</p>
+              <button
+                type="button"
+                onClick={() => handleBeginEyeSession('right')}
+                disabled={!canBeginEyeSession()}
+                className={`px-8 py-3 rounded-lg text-lg font-semibold shadow transition ${
+                  canBeginEyeSession()
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                }`}
+              >
+                Continue: I am covering my left eye
+              </button>
+            </div>
+          )}
 
-              <p className="text-lg text-gray-700 mb-1">
+          {stage === 'eye_prep_left' && (
+            <div className="text-center max-w-lg">
+              <p className="text-lg font-semibold text-gray-900 mb-1">Step B: Left eye</p>
+              <div className="flex justify-center items-center gap-2 mb-3 text-5xl text-slate-400">
+                <HiOutlineHandRaised className="text-amber-600 h-12 w-12" />
+                <span className="text-2xl">→</span>
+                <HiOutlineEye className="text-blue-600 h-14 w-14" />
+              </div>
+              <p className="text-sm text-gray-700 mb-4 font-medium">
+                Cover your <strong>right</strong> eye. Look with <strong>left</strong> only.
+              </p>
+              <p className="text-xs text-gray-600 mb-3">
+                Same task: rotating <strong>E</strong>. Say where the <strong>gap</strong> points.
+              </p>
+              <button
+                type="button"
+                onClick={() => handleBeginEyeSession('left')}
+                disabled={!canBeginEyeSession()}
+                className={`px-8 py-3 rounded-lg text-lg font-semibold shadow transition ${
+                  canBeginEyeSession()
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                }`}
+              >
+                Continue: I am covering my right eye
+              </button>
+            </div>
+          )}
+
+          {(stage === 'testing' || stage === 'paused') && currentItem && (
+            <div className="text-center w-full max-w-md flex flex-col">
+              <p className="text-sm text-slate-600 mb-1 order-1">
                 {(() => {
                   const levels = Array.from(new Set(testItems.map((t) => t.level)));
                   const levelIndex = currentLevel ? levels.indexOf(currentLevel) + 1 : 0;
                   const levelResponsesCount = responses.filter(
-                    (r) => r.level === currentLevel
+                    (r) => r.level === currentLevel && r.eye === currentEye
                   ).length;
                   const letterNumber = Math.min(
                     LETTERS_PER_LEVEL,
                     levelResponsesCount + 1
                   );
-                  return `Level ${levelIndex} of ${levels.length} — Letter ${letterNumber} of ${LETTERS_PER_LEVEL} — Testing ${currentLevel}`;
+                  const eyeLabel = currentEye === 'right' ? 'Right (OD)' : 'Left (OS)';
+                  return `${eyeLabel} · Level ${levelIndex} of ${levels.length} · Letter ${letterNumber} of ${LETTERS_PER_LEVEL} · ${currentLevel}`;
                 })()}
               </p>
-              <p className="text-sm text-gray-600 mb-1">
+              <p className="text-sm text-slate-500 mb-3 order-2 min-h-[1.25rem]">
                 {stage === 'paused'
                   ? 'Test paused due to unstable conditions.'
                   : timeLeft !== null
                   ? `Time left: ${timeLeft}s`
                   : '\u00A0'}
               </p>
-              <p className="text-sm text-gray-500 mb-2">
-                {voiceSupported
-                  ? 'Say the letter you see. If the system cannot hear you, you can type it below or tap a letter.'
-                  : 'Voice input is not available. Use the letter buttons or type your answer.'}
-              </p>
 
-              <form onSubmit={handleManualSubmit} className="mt-2">
-                <input
-                  type="text"
-                  value={manualInput}
-                  onChange={(e) => setManualInput(e.target.value)}
-                  maxLength={1}
-                  className="w-24 h-24 text-4xl text-center border-4 border-blue-600 rounded-lg focus:outline-none focus:ring-4 focus:ring-blue-300"
-                  placeholder={voiceSupported ? 'A' : '?'}
-                />
-                <button
-                  type="submit"
-                  className="block mx-auto mt-4 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-600"
-                  disabled={!manualInput}
+              {/* No CSS transition on transform/size: animating rotation between trials cues the answer */}
+              <div className="order-3 mb-3">
+                <div
+                  key={`${currentEye}-${currentIndex}`}
+                  className="font-bold transition-none select-none inline-block"
+                  style={{
+                    fontSize: `${optotypeSizePx}px`,
+                    lineHeight: 1,
+                    transform: directionToRotation[currentItem.direction] || 'rotate(0deg)'
+                  }}
                 >
-                  Submit
-                </button>
-              </form>
-
-              <div className="mt-4 grid grid-cols-3 gap-2 max-w-xs mx-auto">
-                {['C', 'D', 'F', 'L', 'O', 'P', 'T', 'Z', 'E'].map((letter) => (
-                  <button
-                    key={letter}
-                    type="button"
-                    onClick={() => {
-                      const item = testItems[currentIndex];
-                      if (!item) return;
-                      recordResponse(letter, item);
-                    }}
-                    className="h-12 rounded-md border border-gray-300 bg-white text-lg font-semibold hover:bg-blue-50"
-                  >
-                    {letter}
-                  </button>
-                ))}
+                  E
+                </div>
               </div>
 
-              {message && (
-                <p className="text-sm text-gray-600 mt-4 min-h-[1.5rem]">{message}</p>
+              {showGlassesWarning && (
+                <div
+                  className="order-4 bg-amber-50 border border-amber-200 text-amber-900 px-4 py-3 rounded-md text-sm mb-3 text-left"
+                  role="alert"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-semibold">
+                      Glasses detected. For best results, test without glasses if possible. You
+                      can continue wearing them.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowGlassesWarning(false)}
+                      className="ml-2 text-amber-900 opacity-70 hover:opacity-100 font-bold shrink-0"
+                      aria-label="Dismiss glasses warning"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
               )}
 
-              {stage === 'paused' && (
-                <p className="text-sm text-amber-600 mt-2">
-                  {resumeCountdown != null
-                    ? `Conditions look good. Resuming in ${resumeCountdown}…`
-                    : 'Please fix the issue shown above to continue.'}
+              {/* Controls directly under the E so touch/keyboard stay near the letter */}
+              <div className="order-5 flex flex-col items-center gap-3 w-full">
+                <p className="text-sm text-slate-700 font-medium">
+                  {voiceSupported
+                    ? 'Tap a direction, use arrow keys, or type R / L / U / D'
+                    : 'Tap a direction, use arrow keys, or type below'}
                 </p>
-              )}
 
-              {voiceSupported && (
-                <p className="text-xs text-gray-400 mt-2">
-                  {isListening ? 'Listening…' : 'Waiting for your response.'}
-                </p>
-              )}
+                <div
+                  className="mx-auto grid gap-2 max-w-[200px] w-full"
+                  style={{ gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(3, 1fr)' }}
+                >
+                  {dPadButtons.map((btn) => (
+                    <button
+                      key={btn.key}
+                      type="button"
+                      style={{ gridRow: btn.row, gridColumn: btn.col }}
+                      onClick={() => {
+                        const item = testItems[currentIndex];
+                        if (!item) return;
+                        recordResponse(btn.key, item);
+                      }}
+                      className="h-14 min-h-[48px] rounded-lg border-2 border-slate-300 bg-white text-xl font-semibold text-slate-800 shadow-sm hover:bg-blue-50 hover:border-blue-400 active:bg-blue-100"
+                    >
+                      {btn.icon}
+                    </button>
+                  ))}
+                </div>
+
+                <form onSubmit={handleManualSubmit} className="w-full max-w-[200px] flex flex-col items-center gap-2">
+                  <input
+                    type="text"
+                    inputMode="text"
+                    autoComplete="off"
+                    value={manualInput}
+                    onChange={(e) => setManualInput(e.target.value)}
+                    maxLength={10}
+                    className="w-full h-14 text-2xl text-center border-2 border-blue-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    placeholder="R / L / U / D"
+                    aria-label="Type direction"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 text-sm font-semibold"
+                    disabled={!manualInput}
+                  >
+                    Submit
+                  </button>
+                </form>
+
+                {voiceSupported && (
+                  <p className="text-xs text-slate-500">
+                    {isListening ? 'Listening…' : 'Waiting for your response.'}
+                  </p>
+                )}
+
+                {message && (
+                  <p className="text-sm text-slate-700 bg-slate-100 rounded-lg px-3 py-2 w-full" role="status">
+                    {message}
+                  </p>
+                )}
+
+                {stage === 'paused' && (
+                  <p className="text-sm text-amber-700">
+                    {resumeCountdown != null
+                      ? `Conditions look good. Resuming in ${resumeCountdown}…`
+                      : 'Please fix the issue shown above to continue.'}
+                  </p>
+                )}
+              </div>
+
+              <details className="order-6 mt-6 text-left border-t border-slate-200 pt-4">
+                <summary className="text-sm font-medium text-slate-800 cursor-pointer marker:text-slate-400">
+                  How this test works
+                </summary>
+                <div className="mt-3 text-xs text-slate-600 leading-relaxed space-y-2 pl-0.5">
+                  <p>
+                    Each <strong>E</strong> is shown in its final direction only (no turning animation). Say
+                    which way the <strong>gap</strong> opens: <strong>right, left, up,</strong> or{' '}
+                    <strong>down</strong> (same as the pad).
+                  </p>
+                  <p>
+                    If you cannot see it clearly, guess anyway. That still tells us when to stop and how to
+                    score your last reliable line size.
+                  </p>
+                </div>
+              </details>
             </div>
           )}
 

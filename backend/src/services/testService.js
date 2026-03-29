@@ -11,6 +11,21 @@ import {
 import logger from '../utils/logger.js';
 
 /**
+ * Normalize a TestResult.userId field to a hex string whether it is a raw ObjectId
+ * or a populated User document (fixes 403 after .populate('userId')).
+ */
+function ownerIdString(userIdField) {
+  if (userIdField == null) return '';
+  if (userIdField instanceof mongoose.Types.ObjectId) {
+    return userIdField.toString();
+  }
+  if (typeof userIdField === 'object' && userIdField._id != null) {
+    return userIdField._id.toString();
+  }
+  return String(userIdField);
+}
+
+/**
  * Test Service
  * Handles vision test result operations
  */
@@ -38,12 +53,20 @@ export const createTestResult = async (userId, testData) => {
       throw new AuthorizationError('Your account is not active. Cannot save test results');
     }
     
-    // 2. Add userId to test data
+    // 2. Add userId to test data; ensure each trial has userResponse as a string (timeouts use '').
+    const responses = Array.isArray(testData.responses)
+      ? testData.responses.map((r) => ({
+          ...r,
+          userResponse: typeof r?.userResponse === 'string' ? r.userResponse : ''
+        }))
+      : testData.responses;
+
     const testResultData = {
       ...testData,
+      responses,
       userId
     };
-    
+
     // 3. Create test result
     const testResult = await TestResult.create(testResultData);
     
@@ -77,9 +100,12 @@ export const createTestResult = async (userId, testData) => {
  */
 export const getTestResultById = async (testId, requesterId) => {
   try {
-    // Find test result
-    const test = await TestResult.findById(testId);
-    
+    // Find test result (populate user for results UI / PDF name)
+    const test = await TestResult.findById(testId).populate(
+      'userId',
+      'name email'
+    );
+
     if (!test) {
       throw new NotFoundError('Test result not found');
     }
@@ -87,13 +113,13 @@ export const getTestResultById = async (testId, requesterId) => {
     // Check authorization
     const requester = await User.findById(requesterId);
     
-    if (
-      test.userId.toString() !== requesterId &&
-      requester.role !== 'admin'
-    ) {
+    const ownerId = ownerIdString(test.userId);
+    const requesterStr = ownerIdString(requesterId);
+
+    if (ownerId !== requesterStr && requester.role !== 'admin') {
       throw new AuthorizationError('You do not have permission to view this test result');
     }
-    
+
     return test;
     
   } catch (error) {
@@ -214,11 +240,11 @@ export const deleteTestResult = async (testId, requesterId) => {
     
     // Check authorization
     const requester = await User.findById(requesterId);
-    
-    if (
-      test.userId.toString() !== requesterId &&
-      requester.role !== 'admin'
-    ) {
+
+    const ownerId = ownerIdString(test.userId);
+    const requesterStr = ownerIdString(requesterId);
+
+    if (ownerId !== requesterStr && requester.role !== 'admin') {
       throw new AuthorizationError('You do not have permission to delete this test result');
     }
     

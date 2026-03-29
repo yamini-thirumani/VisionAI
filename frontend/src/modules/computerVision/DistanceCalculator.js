@@ -1,21 +1,18 @@
+import {
+  CALIB_K_KEY,
+  readStoredCalibrationK
+} from '../../utils/calibration.js';
+
 class DistanceCalculator {
   constructor() {
     this.AVERAGE_IPD = 63;
 
     // Per-device calibration constant K for the distance formula:
     //   D(cm) = K × (image_width / IPD_pixels)
-    // If a calibrated K is stored, prefer that; otherwise fall back
-    // to a conservative default around 100 as recommended.
-    let storedK = NaN;
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const raw = window.localStorage.getItem('visionai_calibration_K');
-      if (raw != null) {
-        storedK = parseFloat(raw);
-      }
-    }
+    const storedK = readStoredCalibrationK();
 
     this.calibrationFactor =
-      Number.isFinite(storedK) && storedK > 0 ? storedK : 100;
+      storedK != null ? storedK : 7;
 
     this.alpha = 0.2;
     this.smoothedDistance = null;
@@ -29,7 +26,7 @@ class DistanceCalculator {
     if (!Number.isFinite(k) || k <= 0) return;
     this.calibrationFactor = k;
     if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem('visionai_calibration_K', String(k));
+      window.localStorage.setItem(CALIB_K_KEY, String(k));
     }
   }
 

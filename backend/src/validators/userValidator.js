@@ -85,14 +85,15 @@ export const updateProfileSchema = Joi.object({
   .optional(),
 
   calibration: Joi.object({
+    // K = distance_cm * ipd_pixels / image_width — typical values are ~2–30 for normal webcam framing
     K: Joi.number()
-      .min(10)
-      .max(1000)
+      .min(0.1)
+      .max(10000)
       .required()
       .messages({
         'number.base': 'Calibration constant K must be a number',
-        'number.min': 'Calibration constant K seems too small',
-        'number.max': 'Calibration constant K seems too large',
+        'number.min': 'Calibration constant K is out of range',
+        'number.max': 'Calibration constant K is out of range',
         'any.required': 'Calibration constant K is required'
       })
   }).optional()

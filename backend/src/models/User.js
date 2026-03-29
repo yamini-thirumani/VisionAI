@@ -112,8 +112,8 @@ const userSchema = new mongoose.Schema({
   calibration: {
     K: {
       type: Number,
-      min: [10, 'Calibration constant K seems too small'],
-      max: [1000, 'Calibration constant K seems too large']
+      min: [0.1, 'Calibration constant K is out of range'],
+      max: [10000, 'Calibration constant K is out of range']
     },
     lastCalibratedAt: {
       type: Date,

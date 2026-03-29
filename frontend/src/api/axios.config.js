@@ -1,7 +1,12 @@
 import axios from 'axios';
 
+// Without VITE_API_URL, requests hit the Vite dev server and return HTML → broken JSON / missing `data.test`.
+const resolvedBase =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: resolvedBase,
   headers: {
     'Content-Type': 'application/json'
   }

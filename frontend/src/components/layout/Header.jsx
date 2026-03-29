@@ -21,7 +21,7 @@ function Header() {
             VA
           </div>
           <div className="flex flex-col">
-            <span className="text-base font-semibold text-slate-900 tracking-tight">
+            <span className="font-serif text-base font-semibold text-slate-900 tracking-tight">
               VisionAI
             </span>
             <span className="text-[11px] uppercase tracking-[0.14em] text-emerald-600">

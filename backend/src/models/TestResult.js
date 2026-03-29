@@ -50,6 +50,30 @@ const testResultSchema = new mongoose.Schema({
       default: 0
     }
   },
+
+  // Monocular screening: separate scores per eye (right = OD, left = OS)
+  visualAcuityByEye: {
+    right: {
+      snellen: {
+        type: String,
+        match: [/^20\/\d+$/, 'Invalid Snellen format (e.g., 20/40)'],
+        trim: true
+      },
+      logMAR: { type: Number, min: -0.3, max: 2.0 },
+      decimal: { type: Number, min: 0, max: 2 },
+      accuracyPercentage: { type: Number, min: 0, max: 100 }
+    },
+    left: {
+      snellen: {
+        type: String,
+        match: [/^20\/\d+$/, 'Invalid Snellen format (e.g., 20/40)'],
+        trim: true
+      },
+      logMAR: { type: Number, min: -0.3, max: 2.0 },
+      decimal: { type: Number, min: 0, max: 2 },
+      accuracyPercentage: { type: Number, min: 0, max: 100 }
+    }
+  },
   
   // ========================================
   // TEST CLASSIFICATION
@@ -94,6 +118,24 @@ const testResultSchema = new mongoose.Schema({
       enum: ['OPTIMAL', 'TOO_DARK', 'TOO_BRIGHT', 'GLARE_DETECTED', 'UNKNOWN'],
       default: 'UNKNOWN'
     },
+
+    // If the user is wearing glasses/spectacles during the screening.
+    glassesDetected: {
+      type: Boolean
+    },
+
+    testMode: {
+      type: String,
+      enum: ['monocular', 'binocular'],
+      default: 'monocular'
+    },
+
+    // How viewing distance / letter size was anchored (not ML training).
+    distanceCalibrationSource: {
+      type: String,
+      enum: ['device_or_profile', 'session_opt_out', 'default_estimate'],
+      default: 'default_estimate'
+    },
     
     violations: [{
       type: {
@@ -105,6 +147,14 @@ const testResultSchema = new mongoose.Schema({
         type: Number,
         min: 0,
         default: 1
+      },
+      reason: {
+        type: String,
+        maxlength: 500
+      },
+      durationSeconds: {
+        type: Number,
+        min: 0
       },
       timestamp: {
         type: Date,
@@ -152,7 +202,12 @@ const testResultSchema = new mongoose.Schema({
     averageResponseTime: {
       type: Number,
       min: [0, 'Response time cannot be negative']
-    }
+    },
+
+    pauses: [{
+      reason: { type: String, maxlength: 500 },
+      durationSeconds: { type: Number, min: 0 }
+    }]
   },
   
   // ========================================
@@ -169,13 +224,18 @@ const testResultSchema = new mongoose.Schema({
       type: String,
       required: true,
       minlength: 1,
-      maxlength: 1
+      maxlength: 5
     },
+    // Timed-out trials use ''. Mongoose `required: true` on String rejects '', so use a custom check.
     userResponse: {
       type: String,
-      required: true,
-      minlength: 1,
-      maxlength: 1
+      maxlength: 10,
+      validate: {
+        validator(v) {
+          return typeof v === 'string';
+        },
+        message: 'userResponse must be a string (empty allowed for timed-out trials)'
+      }
     },
     correct: {
       type: Boolean,
@@ -190,6 +250,11 @@ const testResultSchema = new mongoose.Schema({
       type: Number,
       min: 20,
       max: 150
+    },
+    eye: {
+      type: String,
+      enum: ['right', 'left', 'both'],
+      default: 'both'
     }
   }],
   

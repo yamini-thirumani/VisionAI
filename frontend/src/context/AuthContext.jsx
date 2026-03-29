@@ -1,5 +1,6 @@
 import { createContext, useState, useEffect } from 'react';
 import { authApi } from '../api/authApi';
+import { applyCalibrationFromUser } from '../utils/calibration';
 
 export const AuthContext = createContext();
 
@@ -16,7 +17,9 @@ export const AuthProvider = ({ children }) => {
     if (token) {
       try {
         const response = await authApi.getCurrentUser();
-        setUser(response.data.data.user);
+        const u = response.data.data.user;
+        applyCalibrationFromUser(u);
+        setUser(u);
       } catch (error) {
         localStorage.removeItem('token');
       }
@@ -28,6 +31,7 @@ export const AuthProvider = ({ children }) => {
     const response = await authApi.login({ email, password });
     const { user, token } = response.data.data;
     localStorage.setItem('token', token);
+    applyCalibrationFromUser(user);
     setUser(user);
     return user;
   };
@@ -36,6 +40,7 @@ export const AuthProvider = ({ children }) => {
     const response = await authApi.register(data);
     const { user, token } = response.data.data;
     localStorage.setItem('token', token);
+    applyCalibrationFromUser(user);
     setUser(user);
     return user;
   };

@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import FaceDetection from '../modules/computerVision/FaceDetection';
 import DistanceCalculator from '../modules/computerVision/DistanceCalculator';
 import { userApi } from '../api/userApi';
+import {
+  HiOutlineCreditCard,
+  HiOutlineFaceSmile,
+  HiOutlineCalculator
+} from 'react-icons/hi2';
+import { markCalibrationCompleteOnDevice } from '../utils/calibration';
 
 function CalibrationPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = location.state?.returnTo || '/dashboard';
   const videoRef = useRef(null);
   const faceDetection = useRef(null);
   const distanceCalc = useRef(new DistanceCalculator());
@@ -14,9 +24,7 @@ function CalibrationPage() {
   const [imageWidth, setImageWidth] = useState(null);
   const [distanceCm, setDistanceCm] = useState('50');
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState(
-    'Hold a credit card against your screen until it visually matches the on-screen card, then enter your approximate distance and confirm.'
-  );
+  const [message, setMessage] = useState('Face the camera, then follow the 3 steps on the right.');
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
@@ -109,16 +117,30 @@ function CalibrationPage() {
     setSaving(true);
     try {
       distanceCalc.current.setCalibrationFactor(K);
-      if (user?.id) {
-        await userApi.updateProfile(user.id, {
+      markCalibrationCompleteOnDevice();
+      const uid = user?.id || user?._id;
+      if (uid) {
+        await userApi.updateProfile(uid, {
           calibration: { K }
         });
       }
-      setSuccess(`Calibration saved. Using K ≈ ${K.toFixed(1)} for distance estimates.`);
-      setMessage('Calibration complete. You can now run tests with improved distance accuracy.');
+      setSuccess(`Saved. Distance uses K ≈ ${K.toFixed(1)} on this device.`);
+      setMessage('Calibration complete. You can run the vision test with meaningful letter sizes.');
     } catch (e) {
       console.error('Error saving calibration:', e);
-      setError('Unable to save calibration at this time. Please try again later.');
+      const apiErrors = e?.response?.data?.errors;
+      const firstDetail =
+        Array.isArray(apiErrors) && apiErrors.length > 0
+          ? apiErrors.map((x) => x.message || x.field).filter(Boolean).join(' ')
+          : null;
+      const apiMessage = e?.response?.data?.message;
+      setError(
+        firstDetail ||
+          apiMessage ||
+          (e?.message?.includes('Network Error')
+            ? 'Cannot reach the server. Check that the API is running and VITE_API_URL is set if needed.'
+            : 'Unable to save calibration at this time. Please try again later.')
+      );
     } finally {
       setSaving(false);
     }
@@ -126,11 +148,20 @@ function CalibrationPage() {
 
   return (
     <div className="container mx-auto p-4 md:p-8">
-      <h1 className="text-2xl md:text-3xl font-bold mb-2">Distance Calibration</h1>
-      <p className="text-sm text-gray-600 mb-6 max-w-2xl">
-        This one-time calibration helps VisionAI estimate your viewing distance more accurately
-        using your webcam. You only need to repeat this if you change devices or displays.
-      </p>
+      <h1 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight text-slate-900 mb-2">
+        Distance calibration
+      </h1>
+      <div className="text-sm text-slate-700 mb-4 max-w-2xl space-y-3 leading-relaxed">
+        <p>
+          <strong className="text-slate-900">What it is for:</strong> The app estimates how far you sit from
+          the screen. Snellen letter size depends on that distance. Calibration links what the camera sees
+          (your face width in pixels) to a real distance in centimetres, using a credit card for scale. That
+          is a <strong>geometry adjustment</strong>, not training or tuning of an AI model.
+        </p>
+        <p className="text-xs text-slate-600">
+          Do this once per device. If you skip it, letter size uses a default viewing distance (less exact).
+        </p>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">
@@ -146,10 +177,12 @@ function CalibrationPage() {
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <h2 className="text-sm font-semibold mb-2">On-screen reference card</h2>
+            <div className="flex items-center gap-2 mb-2">
+              <HiOutlineCreditCard className="h-5 w-5 text-emerald-600 shrink-0" aria-hidden />
+              <h2 className="text-sm font-semibold">Match card size</h2>
+            </div>
             <p className="text-xs text-gray-600 mb-3">
-              Hold a real credit card against your screen and adjust zoom until it visually
-              matches the width of the rectangle below.
+              Hold a real card on the screen. Zoom until it matches the box.
             </p>
             <div className="flex justify-center">
               <div className="border-2 border-dashed border-emerald-500 rounded-md w-40 h-24 flex items-center justify-center bg-emerald-50">
@@ -162,10 +195,26 @@ function CalibrationPage() {
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
-          <h2 className="text-lg font-semibold">Step 2 — Confirm your distance</h2>
+          <div className="grid gap-3 sm:grid-cols-3 text-center text-xs mb-2">
+            <div className="rounded-lg bg-slate-50 border border-slate-100 p-3">
+              <HiOutlineCreditCard className="h-8 w-8 mx-auto text-emerald-600 mb-1" aria-hidden />
+              <p className="font-semibold text-slate-800">1. Match card</p>
+              <p className="text-slate-500 mt-0.5">Same width as box</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 border border-slate-100 p-3">
+              <HiOutlineFaceSmile className="h-8 w-8 mx-auto text-blue-600 mb-1" aria-hidden />
+              <p className="font-semibold text-slate-800">2. Face visible</p>
+              <p className="text-slate-500 mt-0.5">Eyes on camera</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 border border-slate-100 p-3">
+              <HiOutlineCalculator className="h-8 w-8 mx-auto text-violet-600 mb-1" aria-hidden />
+              <p className="font-semibold text-slate-800">3. Type cm + Calibrate</p>
+              <p className="text-slate-500 mt-0.5">How far you sit</p>
+            </div>
+          </div>
+          <h2 className="text-lg font-semibold">Your distance (cm)</h2>
           <p className="text-sm text-gray-600">
-            Sit at a comfortable distance from the screen (ideally 40–60 cm), then enter how far
-            you are from the screen and click **Calibrate** while your face is clearly visible.
+            Sit as you will for the test (~45–60 cm). Enter that number, then press Calibrate.
           </p>
 
           <form onSubmit={handleCalibrate} className="space-y-4">
@@ -221,6 +270,15 @@ function CalibrationPage() {
             >
               {saving ? 'Saving…' : 'Calibrate'}
             </button>
+            {success && (
+              <button
+                type="button"
+                onClick={() => navigate(returnTo)}
+                className="mt-2 w-full sm:w-auto inline-flex items-center justify-center px-6 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
+              >
+                {returnTo === '/test' ? 'Continue to vision test' : 'Continue'}
+              </button>
+            )}
           </form>
 
           <p className="text-[11px] text-slate-500">

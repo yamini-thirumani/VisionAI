@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { jsPDF } from 'jspdf';
 import { testApi } from '../api/testApi';
+import {
+  downloadIndividualTestPdf,
+  labelDistanceCalibrationSource
+} from '../utils/visionPdf';
+import { cell, NA } from '../utils/display';
 
 function getClassificationTone(classification) {
   const map = {
@@ -30,21 +34,97 @@ function getRecommendation(classification) {
   }
 }
 
+const VIOLATION_TYPE_LABELS = {
+  distance: 'Distance',
+  lighting: 'Lighting',
+  posture: 'Posture',
+  movement: 'Movement'
+};
+
+function extractTestFromResponse(res) {
+  const body = res?.data;
+  if (!body || body.success === false) return null;
+  const payload = body.data;
+  if (!payload) return null;
+  if (payload.test) return payload.test;
+  if (payload._id && payload.visualAcuity) return payload;
+  return null;
+}
+
+function formatViolationDescription(v) {
+  if (v?.reason && String(v.reason).trim()) return String(v.reason).trim();
+  const t = v?.type;
+  const label = VIOLATION_TYPE_LABELS[t] || t || 'Condition';
+  return `${label} violation`;
+}
+
+function resolvePatientName(test) {
+  return (
+    test?.user?.name ||
+    (typeof test?.userId === 'object' && test.userId?.name) ||
+    test?.patientName ||
+    'Patient'
+  );
+}
+
+function buildPauseEventLines(violations, reliabilityPauses) {
+  const fromViolations = (violations || []).map((p, idx) => ({
+    key: `v-${idx}`,
+    text: `${formatViolationDescription(p)} (${p.durationSeconds ?? 0}s)`
+  }));
+  if (fromViolations.length > 0) return fromViolations;
+  return (reliabilityPauses || []).map((p, idx) => ({
+    key: `p-${idx}`,
+    text: `${p.reason || 'Session pause'} (${p.durationSeconds ?? 0}s)`
+  }));
+}
+
 function ResultsPage() {
   const { testId } = useParams();
   const navigate = useNavigate();
   const [test, setTest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [pdfError, setPdfError] = useState(null);
 
   useEffect(() => {
     const load = async () => {
+      if (!testId || !/^[0-9a-fA-F]{24}$/.test(testId)) {
+        setError('This result link is invalid or incomplete.');
+        setLoading(false);
+        return;
+      }
       try {
         const res = await testApi.getTest(testId);
-        setTest(res.data.data.test);
+        const payload = extractTestFromResponse(res);
+        if (!payload) {
+          setError(
+            'The server response did not include test data. Check that the API URL is correct (VITE_API_URL) and you are logged in.'
+          );
+          return;
+        }
+        setTest(payload);
       } catch (err) {
         console.error('Error loading test result:', err);
-        setError('Unable to load test result. It may have been removed.');
+        const status = err.response?.status;
+        let msg = err.response?.data?.message;
+        if (!err.response) {
+          const base =
+            import.meta.env.VITE_API_URL ||
+            (import.meta.env.DEV ? 'http://localhost:5000/api' : '(not set)');
+          msg = `Cannot reach the API (${base}). Start the backend, confirm the URL matches your .env, and try again.`;
+        } else if (status === 401) {
+          msg = 'Please sign in again to view this result.';
+        } else if (status === 403) {
+          msg = 'You do not have permission to view this test result.';
+        } else if (status === 404) {
+          msg = 'This test result was not found. It may have been deleted or the link is wrong.';
+        }
+        setError(
+          msg ||
+            err.message ||
+            'Unable to load test result. It may have been removed.'
+        );
       } finally {
         setLoading(false);
       }
@@ -58,118 +138,72 @@ function ResultsPage() {
 
   if (error || !test) {
     return (
-      <div className="container mx-auto p-8">
-        <h1 className="text-2xl font-bold mb-4">Test Result</h1>
-        <p className="text-red-600 mb-6">{error || 'Result not found.'}</p>
-        <button
-          type="button"
-          onClick={() => navigate('/dashboard')}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
-        >
-          Back to Dashboard
-        </button>
+      <div className="container mx-auto p-8 max-w-xl">
+        <h1 className="text-2xl font-bold mb-2">Could not load result</h1>
+        <p className="text-red-700 mb-6 text-sm leading-relaxed">{error || 'Result not found.'}</p>
+        <div className="flex flex-wrap gap-3">
+          <Link
+            to="/test"
+            className="inline-flex items-center justify-center bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium"
+          >
+            Retake vision test
+          </Link>
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard')}
+            className="bg-white border border-gray-300 text-gray-800 px-6 py-3 rounded-lg hover:bg-gray-50"
+          >
+            Dashboard
+          </button>
+          <Link
+            to="/login"
+            className="inline-flex items-center justify-center bg-gray-200 text-gray-900 px-6 py-3 rounded-lg hover:bg-gray-300"
+          >
+            Sign in
+          </Link>
+        </div>
       </div>
     );
   }
 
-  const patientName = test.user?.name || test.patientName || 'Patient';
+  const patientName = resolvePatientName(test);
   const createdAt = test.createdAt ? new Date(test.createdAt) : null;
   const va = test.visualAcuity || {};
   const reliability = test.reliability || {};
   const conditions = test.testConditions || {};
-  const pauses = reliability.pauses || conditions.violations || [];
-  const totalPauseDuration = pauses.reduce(
+  const pauses = conditions.violations || [];
+  const pauseDurationFromViolations = pauses.reduce(
     (sum, p) => sum + (p.durationSeconds || 0),
     0
   );
+  const pauseDurationFromReliability = (reliability.pauses || []).reduce(
+    (sum, p) => sum + (p.durationSeconds || 0),
+    0
+  );
+  const totalPauseDuration =
+    pauses.length > 0 ? pauseDurationFromViolations : pauseDurationFromReliability;
 
   const classification = test.classification || 'normal';
   const recommendation = getRecommendation(classification);
+  const byEye = test.visualAcuityByEye || null;
 
   const handleDownload = () => {
-    const doc = new jsPDF();
-
-    const title = 'VisionAI Screening Report';
-    doc.setFontSize(16);
-    doc.text(title, 105, 20, { align: 'center' });
-
-    doc.setFontSize(10);
-    const dateStr = createdAt ? createdAt.toLocaleString() : '';
-    doc.text(`Patient: ${patientName}`, 14, 32);
-    if (dateStr) {
-      doc.text(`Date: ${dateStr}`, 14, 38);
+    try {
+      setPdfError(null);
+      downloadIndividualTestPdf(test);
+    } catch (e) {
+      console.error('PDF error:', e);
+      setPdfError('Could not generate the PDF. Try again, or use your browser Print dialog.');
     }
-
-    // Visual acuity block
-    doc.setFontSize(12);
-    doc.text('Visual Acuity', 14, 50);
-    doc.setFontSize(10);
-    doc.text(`Snellen: ${va.snellen || '-'}`, 20, 56);
-    doc.text(`LogMAR: ${va.logMAR ?? '-'}`, 20, 62);
-    doc.text(`Decimal: ${va.decimal ?? '-'}`, 20, 68);
-    const accText =
-      va.accuracyPercentage != null ? `${va.accuracyPercentage}%` : '-';
-    doc.text(`Accuracy: ${accText}`, 20, 74);
-
-    // Classification
-    doc.setFontSize(12);
-    doc.text('Classification', 110, 50);
-    doc.setFontSize(10);
-    doc.text(
-      `Level: ${classification.replace('-', ' ')}`,
-      116,
-      56
-    );
-    doc.text(`Reliability: ${reliability.confidenceScore ?? '-'}%`, 116, 62);
-
-    // Conditions
-    doc.setFontSize(12);
-    doc.text('Test Conditions', 14, 90);
-    doc.setFontSize(10);
-    const distText =
-      conditions.averageDistance != null
-        ? `${conditions.averageDistance} cm`
-        : '-';
-    const lightLevelText =
-      conditions.lightingLevel != null
-        ? `${conditions.lightingLevel}`
-        : '-';
-    const lightingQuality =
-      conditions.lightingQuality ||
-      (conditions.lightingLevel != null ? 'ESTIMATED' : '-');
-
-    doc.text(`Average distance: ${distText}`, 20, 96);
-    doc.text(`Lighting (mean brightness): ${lightLevelText}`, 20, 102);
-    doc.text(`Lighting rating: ${lightingQuality}`, 20, 108);
-    const postureText =
-      reliability.consistencyScore != null
-        ? `${Math.round(reliability.consistencyScore * 100)}%`
-        : '-';
-    doc.text(`Posture stability: ${postureText}`, 20, 114);
-    const durationText =
-      test.testDuration != null ? `${test.testDuration}s` : '-';
-    doc.text(`Test duration: ${durationText}`, 20, 120);
-
-    // Recommendation + disclaimer
-    doc.setFontSize(12);
-    doc.text('Recommendation', 14, 138);
-    doc.setFontSize(10);
-    doc.text(doc.splitTextToSize(recommendation, 180), 20, 144);
-
-    const disclaimer =
-      'This is a preliminary screening tool and is NOT a substitute for a professional eye examination. If you have any concerns about your vision or eye health, please consult a qualified eye care professional.';
-    doc.setFontSize(11);
-    doc.setTextColor(180, 30, 30);
-    doc.text('Medical Disclaimer', 14, 172);
-    doc.setFontSize(9);
-    doc.text(doc.splitTextToSize(disclaimer, 180), 20, 178);
-
-    doc.save(`VisionAI_Report_${test._id}.pdf`);
   };
 
+  const pauseEventLines = buildPauseEventLines(pauses, reliability.pauses);
+
   return (
-    <div className="container mx-auto p-8">
-      <h1 className="text-3xl font-bold mb-1">Vision Test Result</h1>
+    <div className="container mx-auto p-8 max-w-5xl">
+      <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900 mb-1">
+        Vision test result
+      </h1>
       <p className="text-sm text-gray-500 mb-6">
         {patientName}
         {createdAt && ` · ${createdAt.toLocaleString()}`}
@@ -177,27 +211,54 @@ function ResultsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div className="bg-white p-6 rounded-lg shadow col-span-2">
-          <h2 className="text-xl font-semibold mb-4">Visual Acuity</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <h2 className="font-serif text-xl font-semibold text-slate-900 mb-4">Visual acuity</h2>
+          {byEye?.right?.snellen && byEye?.left?.snellen && (
+            <p className="text-xs text-gray-500 mb-3">
+              Summary below uses the <strong>weaker eye</strong> (standard for screening). Per-eye
+              scores are listed separately.
+            </p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <p className="text-xs uppercase text-gray-500 mb-1">Snellen</p>
-              <p className="text-2xl font-bold">{va.snellen || '—'}</p>
+              <p className="text-xs uppercase text-gray-500 mb-1">
+                Snellen {byEye?.right?.snellen ? '(worse eye)' : ''}
+              </p>
+              <p className="text-2xl font-semibold text-slate-900 tabular-nums">
+                {cell(va.snellen)}
+              </p>
             </div>
             <div>
               <p className="text-xs uppercase text-gray-500 mb-1">LogMAR</p>
-              <p className="text-2xl font-bold">{va.logMAR ?? '—'}</p>
+              <p className="text-2xl font-semibold text-slate-900 tabular-nums">
+                {cell(va.logMAR)}
+              </p>
             </div>
             <div>
               <p className="text-xs uppercase text-gray-500 mb-1">Decimal</p>
-              <p className="text-2xl font-bold">{va.decimal ?? '—'}</p>
-            </div>
-            <div>
-              <p className="text-xs uppercase text-gray-500 mb-1">Accuracy</p>
-              <p className="text-2xl font-bold">
-                {va.accuracyPercentage != null ? `${va.accuracyPercentage}%` : '—'}
+              <p className="text-2xl font-semibold text-slate-900 tabular-nums">
+                {cell(va.decimal)}
               </p>
             </div>
           </div>
+
+          {byEye?.right?.snellen && byEye?.left?.snellen && (
+            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-gray-100 pt-4">
+              <div className="rounded-lg bg-slate-50 p-4">
+                <p className="text-xs uppercase text-gray-500 mb-1">Right eye (OD)</p>
+                <p className="text-xl font-bold">{byEye.right.snellen}</p>
+                <p className="text-sm text-gray-600 mt-1 tabular-nums">
+                  LogMAR {cell(byEye.right.logMAR)}
+                </p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-4">
+                <p className="text-xs uppercase text-gray-500 mb-1">Left eye (OS)</p>
+                <p className="text-xl font-bold">{byEye.left.snellen}</p>
+                <p className="text-sm text-gray-600 mt-1 tabular-nums">
+                  LogMAR {cell(byEye.left.logMAR)}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="mt-6">
             <p className="text-xs uppercase text-gray-500 mb-1">Classification</p>
@@ -216,22 +277,33 @@ function ResultsPage() {
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-lg shadow space-y-4">
-          <h2 className="text-xl font-semibold mb-4">Test Quality</h2>
+        <div className="bg-white p-6 rounded-lg shadow space-y-4 border border-slate-100">
+          <h2 className="font-serif text-xl font-semibold text-slate-900 mb-1">Test conditions</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            Session notes (distance, lighting, pauses). Not a machine-learning model score.
+          </p>
+          {conditions.testMode && (
+            <div>
+              <p className="text-xs uppercase text-gray-500 mb-1">Test mode</p>
+              <p className="text-lg font-semibold capitalize">
+                {conditions.testMode === 'monocular' ? 'One eye at a time' : 'Both eyes'}
+              </p>
+            </div>
+          )}
           <div>
-            <p className="text-xs uppercase text-gray-500 mb-1">Reliability</p>
-            <p className="text-2xl font-bold">
-              {reliability.confidenceScore != null
-                ? `${reliability.confidenceScore}%`
-                : '—'}
+            <p className="text-xs uppercase text-gray-500 mb-1">Average Distance</p>
+            <p className="text-lg font-semibold tabular-nums">
+              {conditions.averageDistance != null ? `${conditions.averageDistance} cm` : NA}
             </p>
           </div>
           <div>
-            <p className="text-xs uppercase text-gray-500 mb-1">Average Distance</p>
-            <p className="text-lg font-semibold">
-              {conditions.averageDistance != null
-                ? `${conditions.averageDistance} cm`
-                : '—'}
+            <p className="text-xs uppercase text-gray-500 mb-1">Letter sizing</p>
+            <p className="text-sm font-semibold text-gray-800 leading-snug">
+              {labelDistanceCalibrationSource(conditions.distanceCalibrationSource)}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Snellen letters are sized from estimated viewing distance; calibration aligns that to
+              your screen and seating.
             </p>
           </div>
           <div>
@@ -251,49 +323,46 @@ function ResultsPage() {
                 if (conditions.lightingLevel != null) {
                   return `Level ${conditions.lightingLevel}`;
                 }
-                return '—';
+                return NA;
               })()}
             </p>
           </div>
           <div>
-            <p className="text-xs uppercase text-gray-500 mb-1">Posture Stability</p>
-            <p className="text-lg font-semibold">
-              {reliability.consistencyScore != null
-                ? `${Math.round(reliability.consistencyScore * 100)}%`
-                : '—'}
-            </p>
-          </div>
-          <div>
             <p className="text-xs uppercase text-gray-500 mb-1">Test Duration</p>
-            <p className="text-lg font-semibold">
-              {test.testDuration != null ? `${test.testDuration}s` : '—'}
+            <p className="text-lg font-semibold tabular-nums">
+              {test.testDuration != null ? `${test.testDuration}s` : NA}
             </p>
           </div>
           <div>
-            <p className="text-xs uppercase text-gray-500 mb-1">Pauses</p>
+            <p className="text-xs uppercase text-gray-500 mb-1">Pauses / interruptions</p>
             <p className="text-lg font-semibold">
-              {pauses.length} pause{pauses.length === 1 ? '' : 's'} (
+              {pauseEventLines.length} event{pauseEventLines.length === 1 ? '' : 's'} (
               {totalPauseDuration}s total)
             </p>
           </div>
+
+          {conditions.glassesDetected === true && (
+            <div className="pt-2">
+              <p className="text-sm font-semibold text-amber-700">
+                Test taken with glasses.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow mb-6">
         <h2 className="text-lg font-semibold mb-3">Test Details</h2>
         <p className="text-sm text-gray-600 mb-4">
-          This summary is based on your recent AI-assisted vision screening. It includes
-          your performance across optotype levels, estimated distance, lighting, and
-          observed stability during the test.
+          This summary is from your recent vision screening. It includes your results across optotype
+          levels, estimated viewing distance, lighting, and any pauses during the session.
         </p>
-        {pauses.length > 0 && (
+        {pauseEventLines.length > 0 && (
           <div className="mt-2">
-            <p className="text-xs uppercase text-gray-500 mb-1">Pause Events</p>
+            <p className="text-xs uppercase text-gray-500 mb-1">Condition events</p>
             <ul className="text-sm text-gray-700 list-disc list-inside space-y-1">
-              {pauses.map((p, idx) => (
-                <li key={idx}>
-                  {p.reason || 'Condition violation'} — {p.durationSeconds || 0}s
-                </li>
+              {pauseEventLines.map((row) => (
+                <li key={row.key}>{row.text}</li>
               ))}
             </ul>
           </div>
@@ -309,19 +378,25 @@ function ResultsPage() {
         qualified eye care professional.
       </div>
 
+      {pdfError && (
+        <p className="text-sm text-red-600 mb-3" role="alert">
+          {pdfError}
+        </p>
+      )}
+
       <div className="flex flex-wrap gap-4">
         <button
           type="button"
           onClick={handleDownload}
           className="bg-white border border-gray-300 text-gray-800 px-6 py-3 rounded-lg hover:bg-gray-50"
         >
-          Download Report
+          Download PDF report
         </button>
         <Link
           to="/test"
           className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
         >
-          Retake Test
+          Retake test
         </Link>
         <Link
           to="/history"
