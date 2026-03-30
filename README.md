@@ -8,11 +8,11 @@
 
 ## 🔴 Live Demo
 
-> 🎥 **[Watch Demo Video](#)** — *(add your demo video link here)*
+> 🎥 **[Watch Demo Video](#)** 
 
 ---
 
-## 📌 About the Project
+##  About the Project
 
 **VisionAI** is a self-administered vision screening web application built as a Mini Project for the Department of CSE (Data Science), G. Narayanamma Institute of Technology & Science (GNITS), Hyderabad.
 
@@ -22,7 +22,7 @@ Results are stored securely and users can track their vision trends over time th
 
 ---
 
-## 🎯 Key Features
+## Key Features
 
 - 📷 **Real-time face detection** using MediaPipe FaceMesh
 - 📏 **Auto distance estimation** using inter-pupillary distance (IPD) and calibration
