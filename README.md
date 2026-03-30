@@ -1,6 +1,6 @@
 # VisionAI - AI-Driven Self-Calibrating Vision Screening
 
-> A browser-based, AI-assisted preliminary vision screening application using your webcam — no special hardware required.
+> A browser-based, AI-assisted preliminary vision screening application using your webcam no special hardware required.
 
 ![VisionAI Banner](./screenshots/img2.png)
 
