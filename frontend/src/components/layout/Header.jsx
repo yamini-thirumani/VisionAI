@@ -15,8 +15,8 @@ function Header() {
 
   return (
     <header className="bg-white border-b border-slate-200">
-      <div className="container mx-auto flex items-center justify-between py-3 px-4">
-        <Link to="/" className="flex items-center gap-2">
+      <div className="container mx-auto flex flex-col gap-3 py-3 px-4 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
+        <Link to="/" className="flex shrink-0 items-center gap-2">
           <div className="h-9 w-9 rounded-full bg-emerald-600 flex items-center justify-center text-white font-bold text-lg shadow-sm">
             VA
           </div>
@@ -30,7 +30,7 @@ function Header() {
           </div>
         </Link>
 
-        <nav className="flex items-center gap-2 text-sm">
+        <nav className="flex w-full flex-col items-stretch gap-2 text-sm sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-2">
           {user ? (
             <>
               <HeaderLink to="/dashboard" active={isActive('/dashboard')}>
@@ -51,7 +51,7 @@ function Header() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="ml-2 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="ml-2 w-full max-sm:ml-0 max-sm:mt-1 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 sm:w-auto"
               >
                 Logout
               </button>
@@ -76,7 +76,7 @@ function HeaderLink({ to, active, children }) {
   return (
     <Link
       to={to}
-      className={`px-3 py-1.5 rounded-full font-medium transition ${
+      className={`block w-full text-center px-3 py-1.5 sm:inline-block sm:w-auto sm:text-left rounded-full font-medium transition ${
         active
           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
           : 'text-slate-600 hover:bg-slate-50 border border-transparent'
