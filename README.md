@@ -1,4 +1,4 @@
-# VisionAI — AI-Driven Self-Calibrating Vision Screening
+# VisionAI - AI-Driven Self-Calibrating Vision Screening
 
 > A browser-based, AI-assisted preliminary vision screening application using your webcam — no special hardware required.
 
@@ -230,20 +230,6 @@ VisionAI is a **preliminary screening tool only** and is not a substitute for a 
 
 ---
 
-## 👩‍💻 Team
 
-| Name | Roll No |
-|---|---|
-| Yamini Thirumani | 23251A6762 |
-| M. Sri Hrudhya | 23251A6722 |
-| M. Sneha Priya | 23251A6719 |
-| S. Radhika Reddy | 23251A6733 |
 
-**Guide:** Mrs. C. Bhagyashree, Assistant Professor, CSE (Data Science)
-**Institution:** G. Narayanamma Institute of Technology & Science (GNITS), Hyderabad
 
----
-
-## 📄 License
-
-This project is built for academic purposes under GNITS, Hyderabad.
