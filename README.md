@@ -230,6 +230,22 @@ VisionAI is a **preliminary screening tool only** and is not a substitute for a 
 
 ---
 
+## 🙋‍♀️ About Me
+
+👋 Hi! I’m [Yamini Thirumani](https://github.com/yamini-thirumani) ,  a passionate developer focused on building intuitive, secure, and performance-driven web applications.  
+This project is part of my journey to create impactful solutions through technology.
+
+---
+
+## 🤝 Feedback & Contributions
+
+Found a bug or have suggestions?  
+Feel free to open an issue or fork this repo and contribute!
+
+---
+
+> Made with 💖 and clean code.
+
 
 
 
